@@ -181,7 +181,7 @@ prism/
 Each major milestone is tracked as a Claude Code checkpoint. Resume from any point:
 
 1. **✅ Brand Identity Locked** — Logo, color palette, typography
-2. **🎯 Landing Page** — Marketing site with pricing, testimonials
+2. **✅ Landing Page** — Marketing site with pricing, testimonials
 3. **🖥️ Desktop MVP** — Scan, analyze, delete photos (hardened Python)
 4. **🌐 Web App MVP** — Next.js frontend + FastAPI backend
 5. **📱 Mobile App** — React Native companion app
@@ -204,7 +204,7 @@ git push origin feature/landing-page
 ## 🎯 MVP Scope (Weeks 1-2)
 
 - [x] Brand identity (logo, colors, typography)
-- [ ] Landing page (marketing site)
+- [x] Landing page (marketing site)
 - [ ] Desktop app (hardened CLI + validation)
 - [ ] Web app (basic file upload, dedup analysis)
 - [ ] Basic authentication (email/password)
