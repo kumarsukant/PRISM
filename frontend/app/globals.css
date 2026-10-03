@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+/*
+ * Prism brand tokens — source of truth: brand/BRAND_GUIDELINES.md
+ *
+ * Amber and gray are pinned to exact hex values (Tailwind v4's defaults are
+ * OKLCH approximations). Shades the guidelines reference but don't define
+ * (Amber-600/700, Gray-200/300/400, etc.) use the standard Tailwind values.
+ */
+@theme {
+  --color-amber-50: #fffbeb;
+  --color-amber-100: #fef3c7; /* Light */
+  --color-amber-200: #fde68a;
+  --color-amber-300: #fcd34d;
+  --color-amber-400: #fbbf24; /* Secondary / hover */
+  --color-amber-500: #f59e0b; /* Primary */
+  --color-amber-600: #d97706; /* Active */
+  --color-amber-700: #b45309; /* Links on light surfaces (5.0:1 on white) */
+  --color-amber-800: #92400e;
+  --color-amber-900: #78350f; /* Dark */
+  --color-amber-950: #451a03;
+
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;
+  --color-gray-900: #111827;
+  --color-gray-950: #030712;
+
+  --color-success: #10b981;
+  --color-warning: #f97316;
+  --color-danger: #ef4444;
+  --color-info: #3b82f6;
+
+  --shadow-card: 0 2px 4px rgb(0 0 0 / 0.1);
+
+  /* Type scale line heights from the guidelines */
+  --text-xs--line-height: 1.4;
+  --text-sm--line-height: 1.5;
+  --text-base--line-height: 1.6;
+}
+
+/* Semantic tokens — light values here, inverse palette for dark mode below. */
+:root {
+  color-scheme: light dark;
+
+  --canvas: #ffffff;
+  --canvas-subtle: #f9fafb;
+  --card: #ffffff;
+  --ink: #111827;
+  --ink-muted: #6b7280;
+  --line: #e5e7eb;
+  --link: #b45309;
+  --tint: #fef3c7;
+  --on-tint: #78350f;
+  /* Text on Amber-500 fills: Amber-950, 6.97:1 (WCAG AA; AAA needs 7:1). */
+  --on-brand: #451a03;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #030712;
+    --canvas-subtle: #0a0f1c;
+    --card: #111827;
+    --ink: #f9fafb;
+    --ink-muted: #9ca3af;
+    --line: #1f2937;
+    --link: #fbbf24;
+    --tint: rgb(245 158 11 / 0.12);
+    --on-tint: #fcd34d;
+  }
+}
+
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --color-canvas: var(--canvas);
+  --color-canvas-subtle: var(--canvas-subtle);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-line: var(--line);
+  --color-link: var(--link);
+  --color-tint: var(--tint);
+  --color-on-tint: var(--on-tint);
+  --color-on-brand: var(--on-brand);
+}
+
+html {
+  /* Keep anchored sections clear of the sticky header */
+  scroll-padding-top: 5rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+body {
+  background-color: var(--canvas);
+  color: var(--ink);
+}
