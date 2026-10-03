@@ -1,4 +1,4 @@
-﻿"""
+"""
 PRISM Backend - FastAPI server with IPC messaging from Tauri
 """
 from fastapi import FastAPI, HTTPException
@@ -9,18 +9,23 @@ import os
 import json
 from typing import Optional, List
 
+# Add parent to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from models.scan import ScanSession, PhotoRecord, DuplicateGroup
-from services.services import FolderScanner, ScanProgress, VisualDeduper, SafeDeleter
+from services.scanner import FolderScanner, ScanProgress
+from services.deduper import VisualDeduper
+from services.deleter import SafeDeleter
 
+# Initialize FastAPI app
 app = FastAPI(
     title="PRISM Backend",
     version="0.1.0",
     description="AI-powered photo deduplication backend"
 )
 
+# Add CORS for Tauri IPC communication
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,16 +34,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Initialize config and services
 config = Config()
 scanner = FolderScanner(config)
-deduper: Optional[VisualDeduper] = None
+deduper = Optional[VisualDeduper] = None  # Lazy load on first use
 deleter = SafeDeleter(config)
 
+# Global state
 current_scan: Optional[ScanSession] = None
 scan_results: dict[str, ScanSession] = {}
 
 @app.get("/health")
 async def health():
+    """Health check for IPC communication"""
     return {
         "status": "ok",
         "message": "PRISM backend is running",
@@ -47,16 +55,20 @@ async def health():
 
 @app.post("/scan/start")
 async def start_scan(folder_path: str):
+    """Start a new scan session"""
     global current_scan, deduper
     
     try:
         print(f"Starting scan: {folder_path}")
         
+        # Initialize deduper on first use (lazy load to save startup time)
         if deduper is None:
             deduper = VisualDeduper(config)
         
+        # Create new scan session
         current_scan = ScanSession(folder_path=folder_path)
         
+        # Step 1: Find all images and compute MD5 hashes
         print("Step 1: Scanning folder...")
         def scanner_progress(progress: ScanProgress):
             print(f"  Progress: {progress.files_processed}/{progress.total_files_found} files processed")
@@ -71,14 +83,17 @@ async def start_scan(folder_path: str):
         
         print(f"  Found {len(current_scan.photos)} valid images")
         
+        # Step 2: Find exact duplicates (MD5)
         print("Step 2: Finding exact duplicates...")
         current_scan = deduper.find_exact_duplicates(current_scan)
         print(f"  Found {current_scan.exact_duplicates} exact duplicates")
         
+        # Step 3: Find visual duplicates (CLIP)
         print("Step 3: Finding visual duplicates...")
         current_scan = deduper.find_visual_duplicates(current_scan)
         print(f"  Found {current_scan.visual_duplicates} visual duplicates")
         
+        # Store results
         scan_results[current_scan.id] = current_scan
         
         return {
@@ -100,6 +115,7 @@ async def start_scan(folder_path: str):
 
 @app.get("/scan/progress")
 async def get_progress(scan_id: str):
+    """Get progress of current scan"""
     if scan_id not in scan_results:
         return JSONResponse(
             status_code=404,
@@ -117,6 +133,7 @@ async def get_progress(scan_id: str):
 
 @app.get("/scan/results")
 async def get_results(scan_id: str, include_thumbnails: bool = False):
+    """Get results of completed scan"""
     if scan_id not in scan_results:
         return JSONResponse(
             status_code=404,
@@ -125,6 +142,7 @@ async def get_results(scan_id: str, include_thumbnails: bool = False):
     
     session = scan_results[scan_id]
     
+    # Format results for UI
     groups = []
     for group in session.duplicate_groups:
         photo_details = []
@@ -163,6 +181,7 @@ async def get_results(scan_id: str, include_thumbnails: bool = False):
 
 @app.post("/scan/delete")
 async def delete_duplicates(scan_id: str, group_ids: List[str]):
+    """Delete selected duplicate groups"""
     if scan_id not in scan_results:
         return JSONResponse(
             status_code=404,
@@ -171,8 +190,11 @@ async def delete_duplicates(scan_id: str, group_ids: List[str]):
     
     try:
         session = scan_results[scan_id]
+        
+        # Filter groups to delete
         groups_to_delete = [g for g in session.duplicate_groups if g.id in group_ids]
         
+        # Delete files
         print(f"Deleting {len(groups_to_delete)} duplicate groups...")
         session = deleter.delete_duplicates(session, groups_to_delete)
         
@@ -193,6 +215,7 @@ async def delete_duplicates(scan_id: str, group_ids: List[str]):
 
 @app.get("/stats")
 async def get_stats():
+    """Get server statistics"""
     return {
         "completed_scans": len(scan_results),
         "total_scans_processed": len(scan_results),
@@ -203,4 +226,5 @@ async def get_stats():
 
 if __name__ == "__main__":
     import uvicorn
+    # Run on localhost:8000 for IPC communication
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
