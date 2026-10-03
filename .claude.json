@@ -1,0 +1,169 @@
+{
+  "workspace": {
+    "name": "Prism",
+    "description": "AI-powered photo deduplication SaaS",
+    "version": "0.1.0",
+    "owner": "Sukant",
+    "created": "2026-10-03"
+  },
+  "claude_code": {
+    "enabled": true,
+    "model": "claude-opus-4-6",
+    "temperature": 0.7,
+    "max_tokens": 8000,
+    "timeout": 120
+  },
+  "directories": {
+    "root": ".",
+    "backend": "./backend",
+    "frontend": "./frontend",
+    "mobile": "./mobile",
+    "scripts": "./scripts",
+    "tests": "./tests",
+    "docs": "./docs",
+    "brand": "./brand"
+  },
+  "environments": {
+    "development": {
+      "backend_port": 8000,
+      "frontend_port": 3000,
+      "database_url": "postgresql://prism:prism@localhost:5432/prism_db",
+      "redis_url": "redis://localhost:6379"
+    },
+    "staging": {
+      "backend_url": "https://api-staging.prism.app",
+      "frontend_url": "https://staging.prism.app"
+    },
+    "production": {
+      "backend_url": "https://api.prism.app",
+      "frontend_url": "https://prism.app"
+    }
+  },
+  "dependencies": {
+    "backend": [
+      "fastapi",
+      "sqlalchemy",
+      "pydantic",
+      "python-jose",
+      "stripe"
+    ],
+    "frontend": [
+      "next",
+      "react",
+      "tailwindcss",
+      "typescript"
+    ],
+    "mobile": [
+      "react-native",
+      "expo"
+    ]
+  },
+  "scripts": {
+    "setup": "bash scripts/setup.sh",
+    "backend:dev": "cd backend && python -m uvicorn app.main:app --reload --port 8000",
+    "frontend:dev": "cd frontend && npm run dev",
+    "mobile:dev": "cd mobile && npm start",
+    "test": "pytest tests/",
+    "lint": "black backend/ && eslint frontend/",
+    "db:migrate": "cd backend && alembic upgrade head",
+    "db:seed": "cd backend && python scripts/seed.py"
+  },
+  "checkpoints": [
+    {
+      "name": "Brand Identity Locked",
+      "status": "completed",
+      "date": "2026-10-03",
+      "files": [
+        "brand/BRAND_GUIDELINES.md",
+        "brand/logo/prism-logo-full.svg",
+        "brand/logo/prism-logo-icon.svg"
+      ]
+    },
+    {
+      "name": "Landing Page",
+      "status": "in_progress",
+      "date": "2026-10-04",
+      "files": [
+        "frontend/app/page.tsx",
+        "frontend/components/Hero.tsx",
+        "frontend/components/Pricing.tsx"
+      ]
+    },
+    {
+      "name": "Desktop MVP",
+      "status": "planned",
+      "date": "2026-10-10"
+    },
+    {
+      "name": "Web App MVP",
+      "status": "planned",
+      "date": "2026-10-17"
+    },
+    {
+      "name": "Mobile App",
+      "status": "planned",
+      "date": "2026-10-31"
+    },
+    {
+      "name": "Auth & Payments",
+      "status": "planned",
+      "date": "2026-11-07"
+    },
+    {
+      "name": "Cloud Deployment",
+      "status": "planned",
+      "date": "2026-11-14"
+    },
+    {
+      "name": "ProductHunt Launch",
+      "status": "planned",
+      "date": "2026-11-21"
+    }
+  ],
+  "mcp_servers": [
+    {
+      "name": "GitHub",
+      "url": "https://github.com/api",
+      "enabled": false
+    },
+    {
+      "name": "PostgreSQL",
+      "url": "localhost:5432",
+      "enabled": true,
+      "database": "prism_db"
+    },
+    {
+      "name": "Redis",
+      "url": "localhost:6379",
+      "enabled": true
+    }
+  ],
+  "testing": {
+    "backend": {
+      "framework": "pytest",
+      "coverage": 80,
+      "command": "pytest tests/backend/ -v --cov=app"
+    },
+    "frontend": {
+      "framework": "jest",
+      "coverage": 75,
+      "command": "npm run test -- --coverage"
+    },
+    "e2e": {
+      "framework": "playwright",
+      "command": "npx playwright test"
+    }
+  },
+  "deployment": {
+    "provider": "digitalocean",
+    "region": "blr1",
+    "database": "postgresql",
+    "storage": "spaces",
+    "cdn": "digitalocean-cdn",
+    "monitoring": {
+      "metrics": "prometheus",
+      "logs": "datadog",
+      "errors": "sentry"
+    }
+  }
+}
