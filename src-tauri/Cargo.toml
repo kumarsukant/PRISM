@@ -1,8 +1,8 @@
 [package]
-name = "app"
+name = "prism"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "See your photos clearly - AI-powered duplicate photo finder"
+authors = ["Prism by Sukant"]
 license = ""
 repository = ""
 edition = "2024"
