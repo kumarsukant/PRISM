@@ -46,6 +46,11 @@ export interface ScanStartRequest {
 export interface ScanStartResponse {
   status: string;
   scan_id: string;
+}
+
+export interface ScanSummary {
+  status: string;
+  scan_id: string;
   total_photos: number;
   exact_duplicates: number;
   visual_duplicates: number;
@@ -53,6 +58,18 @@ export interface ScanStartResponse {
   message: string;
 }
 
+export interface ScanProgressResponse {
+  status: 'in_progress' | 'completed' | 'failed' | 'cancelled';
+  phase: 'queued' | 'discovering' | 'hashing' | 'grouping' | 'completed' | 'failed';
+  scan_id: string;
+  files_processed: number;
+  files_total: number;
+  total_photos: number;
+  exact_duplicates: number;
+  visual_duplicates: number;
+  duplicate_groups: number;
+  error_message: string | null;
+}
 export interface DeleteRequest {
   scan_id: string;
   group_ids: string[];

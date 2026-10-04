@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   ScanStartRequest,
   ScanStartResponse,
+  ScanProgressResponse,
   ScanResults,
   DeleteRequest,
   DeleteResponse,
@@ -82,10 +83,32 @@ class ApiService {
     return this.request('/scan/start', 'POST', request);
   }
 
-  async getScanProgress(scanId: string): Promise<any> {
+  async getScanProgress(scanId: string): Promise<ScanProgressResponse> {
     return this.request(`/scan/progress?scan_id=${scanId}`, 'GET');
   }
 
+  /** Polls /scan/progress until the scan finishes. Tolerates a few failed polls in a row. */
+  async waitForScan(
+    scanId: string,
+    onProgress: (progress: ScanProgressResponse) => void
+  ): Promise<ScanProgressResponse> {
+    let failures = 0;
+    for (;;) {
+      try {
+        const progress = await this.getScanProgress(scanId);
+        failures = 0;
+        onProgress(progress);
+        if (progress.status === 'completed') return progress;
+        if (progress.status === 'failed' || progress.status === 'cancelled') {
+          throw new Error(progress.error_message || 'The scan failed');
+        }
+      } catch (error) {
+        failures += 1;
+        if (failures >= 5) throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+  }
   async getScanResults(scanId: string): Promise<ScanResults> {
     return this.request(`/scan/results?scan_id=${scanId}`, 'GET');
   }

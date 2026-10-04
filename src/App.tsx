@@ -5,20 +5,22 @@ import { FolderSelector } from './components/FolderSelector';
 import { ScanProgress } from './components/ScanProgress';
 import { ResultsGrid } from './components/ResultsGrid';
 import { api } from './services/api';
-import type { ScanStartResponse, ScanResults } from './types';
+import { ScanningView } from './components/ScanningView';
+import type { ScanSummary, ScanResults, ScanProgressResponse } from './types';
 
 type AppState = 'starting' | 'folder-select' | 'scanning' | 'results' | 'error';
 
 interface AppData {
   state: AppState;
   error?: string;
-  scanResponse?: ScanStartResponse;
+  scanResponse?: ScanSummary;
   scanResults?: ScanResults;
 }
 
 function App() {
   const [appData, setAppData] = useState<AppData>({ state: 'starting' });
   const [isDeleting, setIsDeleting] = useState(false);
+  const [scanProgress, setScanProgress] = useState<ScanProgressResponse | null>(null);
 
   // Wait for the bundled backend to come up before showing anything
   useEffect(() => {
@@ -42,17 +44,27 @@ function App() {
   }, []);
   const handleFolderSelect = async (folderPath: string) => {
     try {
+      setScanProgress(null);
       setAppData({ state: 'scanning' });
 
-      // Start scan
-      const scanResponse = await api.startScan(folderPath);
+      // Start the scan (returns immediately), then follow its progress
+      const started = await api.startScan(folderPath);
+      const finished = await api.waitForScan(started.scan_id, setScanProgress);
 
       // Fetch results
-      const scanResults = await api.getScanResults(scanResponse.scan_id);
+      const scanResults = await api.getScanResults(started.scan_id);
 
       setAppData({
         state: 'results',
-        scanResponse,
+        scanResponse: {
+          status: 'completed',
+          scan_id: started.scan_id,
+          total_photos: finished.total_photos,
+          exact_duplicates: finished.exact_duplicates,
+          visual_duplicates: finished.visual_duplicates,
+          duplicate_groups: finished.duplicate_groups,
+          message: `Scan complete: ${finished.total_photos} photos, ${finished.duplicate_groups} groups found`,
+        },
         scanResults,
       });
     } catch (error) {
@@ -64,7 +76,6 @@ function App() {
       });
     }
   };
-
   const handleSelectGroups = (_groupIds: string[]) => {
     // This will be used to track selection
     // Actual deletion happens via button click in ResultsGrid
@@ -122,28 +133,10 @@ function App() {
   if (appData.state === 'scanning') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 to-slate-50 dark:from-slate-950 dark:to-slate-900 flex items-center justify-center p-4">
-        <div className="w-full max-w-2xl">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 rounded-full shadow-md mb-4">
-              <div className="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></div>
-              <span className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                Analyzing photos...
-              </span>
-            </div>
-          </div>
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg p-8">
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-12 h-12 border-4 border-amber-200 dark:border-amber-800 border-t-amber-600 dark:border-t-amber-400 rounded-full animate-spin"></div>
-              <p className="text-slate-600 dark:text-slate-400">
-                Scanning folder for photos and detecting duplicates...
-              </p>
-            </div>
-          </div>
-        </div>
+        <ScanningView progress={scanProgress} />
       </div>
     );
   }
-
   if (appData.state === 'results' && appData.scanResponse && appData.scanResults) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 to-slate-50 dark:from-slate-950 dark:to-slate-900 p-8">
