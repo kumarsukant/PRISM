@@ -1,4 +1,4 @@
-﻿"""
+"""
 PRISM Backend - Core Services for photo scanning and deduplication
 """
 from typing import Callable, Optional, List
@@ -311,51 +311,12 @@ class SafeDeleter:
             return session
     
     def _delete_file(self, file_path: str) -> bool:
-        """Delete a single file safely"""
+        """Move a single file to the Recycle Bin / Trash"""
         try:
-            import platform
-            
-            if platform.system() == "Windows":
-                # Use Windows Shell.Application to move to recycle bin
-                try:
-                    import win32com.client
-                    shell = win32com.client.Dispatch("Shell.Application")
-                    shell.NameSpace(0).ParseName(file_path).InvokeVerb("delete")
-                    return True
-                except:
-                    # Fallback: try PowerShell
-                    import subprocess
-                    subprocess.run([
-                        "powershell", "-Command",
-                        f"Remove-Item '{file_path}' -Recurse -Force"
-                    ], check=False)
-                    return True
-            
-            elif platform.system() == "Darwin":
-                # macOS: use osascript
-                import subprocess
-                subprocess.run([
-                    "osascript", "-e",
-                    f'tell application "Finder" to delete POSIX file "{file_path}"'
-                ], check=False)
-                return True
-            
-            else:
-                # Linux: try trash-put or gio trash
-                import subprocess
-                try:
-                    subprocess.run(["trash-put", file_path], check=True)
-                    return True
-                except:
-                    try:
-                        subprocess.run(["gio", "trash", file_path], check=True)
-                        return True
-                    except:
-                        # Fallback: permanent delete
-                        os.remove(file_path)
-                        return True
-        
+            from send2trash import send2trash
+            send2trash(file_path)
+            return True
         except Exception as e:
-            print(f"Could not delete {file_path}: {e}")
+            print(f"Could not move {file_path} to Recycle Bin: {e}")
             return False
         

@@ -161,6 +161,7 @@ function App() {
               <ResultsGrid
                 groups={appData.scanResults.groups}
                 onSelectGroups={handleSelectGroups}
+                onDelete={handleDeleteDuplicates}
                 isDeleting={isDeleting}
               />
             </div>

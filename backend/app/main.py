@@ -1,4 +1,4 @@
-﻿"""
+"""
 PRISM Backend - FastAPI server with IPC messaging from Tauri
 """
 import sys
@@ -177,8 +177,17 @@ async def get_results(scan_id: str):
     }
 
 @app.post("/scan/delete")
-async def delete_duplicates(scan_id: str, group_ids: List[str]):
+async def delete_duplicates(request_data: dict):
     """Delete selected duplicate groups"""
+    scan_id = request_data.get("scan_id", "").strip()
+    group_ids = request_data.get("group_ids", [])
+
+    if not scan_id:
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": "scan_id is required"}
+        )
+
     if scan_id not in scan_results:
         return JSONResponse(
             status_code=404,

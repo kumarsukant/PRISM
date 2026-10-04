@@ -1,18 +1,20 @@
 // src/components/ResultsGrid.tsx
 
 import React, { useState } from 'react';
-import { Check, Trash2, Image as ImageIcon } from 'lucide-react';
+import { Check, Trash2, Image as ImageIcon, Loader2 } from 'lucide-react';
 import type { DuplicateGroup } from '../types';
 
 interface ResultsGridProps {
   groups: DuplicateGroup[];
   onSelectGroups: (groupIds: string[]) => void;
+  onDelete: (groupIds: string[]) => void;
   isDeleting: boolean;
 }
 
 export const ResultsGrid: React.FC<ResultsGridProps> = ({
   groups,
   onSelectGroups,
+  onDelete,
   isDeleting,
 }) => {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
@@ -186,6 +188,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
             be undone.
           </p>
           <button
+            onClick={() => onDelete(Array.from(selectedGroupIds))}
             disabled={isDeleting}
             className={`w-full py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all ${
               isDeleting
