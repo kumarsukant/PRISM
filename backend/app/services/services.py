@@ -115,6 +115,18 @@ class Deduper:
     def __init__(self, config: Config):
         self.config = config
 
+    @staticmethod
+    def _keeper_sort_key(photo: PhotoRecord):
+        """Deterministic keeper choice: shortest filename, then oldest creation time, then path.
+
+        So '3.jpeg' beats '3 - Copy.jpeg' on every run, no matter which file finished hashing first.
+        """
+        try:
+            created = os.path.getctime(photo.file_path)
+        except OSError:
+            created = float("inf")
+        return (len(os.path.basename(photo.file_path)), created, photo.file_path.lower())
+
     def find_exact_duplicates(self, session: ScanSession) -> ScanSession:
         """Find exact duplicates by MD5 hash"""
         print("Finding exact duplicates by MD5...")
@@ -129,11 +141,12 @@ class Deduper:
         exact_count = 0
         for md5_hash, photos in hash_groups.items():
             if len(photos) > 1:
+                photos = sorted(photos, key=self._keeper_sort_key)
                 group = DuplicateGroup(
                     group_type="exact",
                     confidence_score=1.0,
                     photo_ids=[p.id for p in photos],
-                    kept_photo_id=photos[0].id  # Keep the first one
+                    kept_photo_id=photos[0].id  # first after sorting: shortest name, oldest, then path
                 )
                 session.duplicate_groups.append(group)
                 exact_count += len(photos) - 1
