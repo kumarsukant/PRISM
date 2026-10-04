@@ -216,6 +216,56 @@ async def delete_duplicates(request_data: dict):
             content={"status": "error", "message": str(e)}
         )
 
+@app.get("/thumbnail")
+async def get_thumbnail(path: str):
+    """Serve a cached 300px thumbnail for a scanned photo"""
+    import hashlib
+    import tempfile
+    from pathlib import Path
+    from PIL import Image
+    from fastapi.responses import FileResponse
+
+    known = set()
+    for session in scan_results.values():
+        for p in session.photos:
+            known.add(os.path.normcase(os.path.abspath(p.file_path)))
+
+    target = os.path.normcase(os.path.abspath(path))
+    if target not in known:
+        return JSONResponse(
+            status_code=403,
+            content={"status": "error", "message": "File not part of any scan"}
+        )
+
+    if not os.path.exists(path):
+        return JSONResponse(
+            status_code=404,
+            content={"status": "error", "message": "File not found"}
+        )
+
+    cache_dir = Path(tempfile.gettempdir()) / "prism_thumbs"
+    cache_dir.mkdir(exist_ok=True)
+
+    key = hashlib.md5(target.encode("utf-8")).hexdigest()
+    cached = cache_dir / f"{key}.jpg"
+
+    if not cached.exists():
+        try:
+            with Image.open(path) as img:
+                img.draft("RGB", (600, 600))
+                img = img.convert("RGB")
+                img.thumbnail((300, 300), Image.Resampling.LANCZOS)
+                img.save(cached, "JPEG", quality=80)
+        except Exception as e:
+            print(f"Thumbnail failed for {path}: {e}")
+            return JSONResponse(
+                status_code=500,
+                content={"status": "error", "message": str(e)}
+            )
+
+    return FileResponse(cached, media_type="image/jpeg")
+
+
 @app.get("/stats")
 async def get_stats():
     """Get server statistics"""

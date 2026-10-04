@@ -11,3 +11,7 @@ pydantic==2.5.0
 sqlalchemy==2.0.23
 
 Send2Trash
+
+Pillow
+
+Pillow

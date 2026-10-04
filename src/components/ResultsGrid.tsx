@@ -139,6 +139,12 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                         KEPT
                       </span>
                     </div>
+                    <img
+                      src={`http://127.0.0.1:8000/thumbnail?path=${encodeURIComponent(keptPhoto.file_path)}`}
+                      alt={keptPhoto.file_path}
+                      loading="lazy"
+                      className="w-full h-40 object-contain bg-slate-200 dark:bg-slate-800 rounded mb-2"
+                    />
                     <p className="text-xs text-slate-700 dark:text-slate-300 truncate mb-1 font-mono">
                       {keptPhoto.file_path.split('\\').pop()}
                     </p>
@@ -161,6 +167,12 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                         DELETE
                       </span>
                     </div>
+                    <img
+                      src={`http://127.0.0.1:8000/thumbnail?path=${encodeURIComponent(photo.file_path)}`}
+                      alt={photo.file_path}
+                      loading="lazy"
+                      className="w-full h-40 object-contain bg-slate-200 dark:bg-slate-800 rounded mb-2"
+                    />
                     <p className="text-xs text-slate-700 dark:text-slate-300 truncate mb-1 font-mono">
                       {photo.file_path.split('\\').pop()}
                     </p>
