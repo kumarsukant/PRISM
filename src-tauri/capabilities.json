@@ -1,0 +1,7 @@
+{
+  "default": {
+    "permissions": [
+      "dialog:allow-open"
+    ]
+  }
+}
