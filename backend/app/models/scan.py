@@ -1,4 +1,4 @@
-﻿"""
+"""
 Data models for scanning, photos, and duplicates
 """
 from dataclasses import dataclass, field
@@ -50,5 +50,8 @@ class ScanSession:
     storage_freed_mb: float = 0.0
     status: str = "in_progress"  # "in_progress", "completed", "failed", "cancelled"
     error_message: Optional[str] = None
+    phase: str = "queued"  # "queued", "discovering", "hashing", "grouping", "completed", "failed"
+    files_processed: int = 0
+    files_total: int = 0
     photos: list[PhotoRecord] = field(default_factory=list)
     duplicate_groups: list[DuplicateGroup] = field(default_factory=list)

@@ -64,7 +64,6 @@ scanner = FolderScanner(config)
 deduper = Deduper(config)
 deleter = SafeDeleter(config)
 
-current_scan: Optional[ScanSession] = None
 scan_results: dict[str, ScanSession] = {}
 
 @app.get("/health")
@@ -76,83 +75,96 @@ async def health():
         "version": "0.1.0"
     }
 
-@app.post("/scan/start")
-async def start_scan(request_data: dict):
-    """Start a new scan session"""
-    global current_scan
-    
+def _run_scan(session: ScanSession) -> None:
+    """Run a whole scan in a background thread, recording progress on the session.
+
+    The session's status stays "in_progress" until every stage has finished, so a client that
+    sees "completed" can safely fetch the results.
+    """
     try:
-        folder_path = request_data.get("folder_path", "").strip()
-        if not folder_path:
-            return JSONResponse(
-                status_code=400,
-                content={"status": "error", "message": "folder_path is required in request body"}
-            )
-        
-        print(f"Starting scan: {folder_path}")
-        
-        current_scan = ScanSession(folder_path=folder_path)
-        
-        print("Step 1: Scanning folder...")
-        def scanner_progress(progress: ScanProgress):
-            if progress.files_processed % 100 == 0 or progress.files_processed == progress.total_files_found:
+        session.phase = "discovering"
+        print(f"Scan {session.id}: {session.folder_path}")
+
+        def on_progress(progress: ScanProgress):
+            session.phase = progress.phase
+            session.files_processed = progress.files_processed
+            session.files_total = progress.total_files_found
+            if progress.phase == "hashing" and (
+                progress.files_processed % 100 == 0
+                or progress.files_processed == progress.total_files_found
+            ):
                 print(f"  Progress: {progress.files_processed}/{progress.total_files_found} files processed")
-        
-        current_scan = scanner.scan_folder(folder_path, current_scan, scanner_progress)
-        
-        if current_scan.status == "failed":
-            return JSONResponse(
-                status_code=400,
-                content={"status": "error", "message": current_scan.error_message}
-            )
-        
-        print(f"  Found {len(current_scan.photos)} valid images")
-        
-        print("Step 2: Finding exact duplicates...")
-        current_scan = deduper.find_exact_duplicates(current_scan)
-        print(f"  Found {current_scan.exact_duplicates} exact duplicates")
-        
-        print("Step 3: Finding visual duplicates...")
-        current_scan = deduper.find_visual_duplicates(current_scan)
-        print(f"  Found {current_scan.visual_duplicates} visual duplicates")
-        
-        scan_results[current_scan.id] = current_scan
-        
-        return {
-            "status": "completed",
-            "scan_id": current_scan.id,
-            "total_photos": current_scan.total_photos,
-            "exact_duplicates": current_scan.exact_duplicates,
-            "visual_duplicates": current_scan.visual_duplicates,
-            "duplicate_groups": len(current_scan.duplicate_groups),
-            "message": f"Scan complete: {current_scan.total_photos} photos, {len(current_scan.duplicate_groups)} groups found"
-        }
-        
+
+        scanner.scan_folder(session.folder_path, session, on_progress)
+
+        if session.status == "failed":
+            session.phase = "failed"
+            print(f"Scan failed: {session.error_message}")
+            return
+
+        print(f"  Found {len(session.photos)} valid images")
+
+        session.phase = "grouping"
+        deduper.find_exact_duplicates(session)
+        deduper.find_visual_duplicates(session)
+
+        session.phase = "completed"
+        session.status = "completed"
+        print(f"Scan complete: {session.total_photos} photos, {len(session.duplicate_groups)} groups")
+
     except Exception as e:
         print(f"Scan error: {e}")
         import traceback
         traceback.print_exc()
+        session.error_message = str(e)
+        session.phase = "failed"
+        session.status = "failed"
+
+
+@app.post("/scan/start")
+async def start_scan(request_data: dict):
+    """Start a scan in the background and return immediately. Poll /scan/progress for status."""
+    folder_path = str(request_data.get("folder_path", "")).strip()
+    if not folder_path:
         return JSONResponse(
             status_code=400,
-            content={"status": "error", "message": str(e)}
+            content={"status": "error", "message": "folder_path is required in request body"}
         )
+    if not os.path.isdir(folder_path):
+        return JSONResponse(
+            status_code=400,
+            content={"status": "error", "message": f"Folder not found: {folder_path}"}
+        )
+
+    session = ScanSession(folder_path=folder_path)
+    scan_results[session.id] = session
+    threading.Thread(
+        target=_run_scan, args=(session,), daemon=True, name=f"scan-{session.id[:8]}"
+    ).start()
+    return {"status": "started", "scan_id": session.id}
+
 
 @app.get("/scan/progress")
 async def get_progress(scan_id: str):
-    """Get progress of current scan"""
-    if scan_id not in scan_results:
+    """Get progress of a scan (running or finished)"""
+    session = scan_results.get(scan_id)
+    if session is None:
         return JSONResponse(
             status_code=404,
             content={"status": "error", "message": "Scan not found"}
         )
-    
-    session = scan_results[scan_id]
+
     return {
         "status": session.status,
+        "phase": session.phase,
         "scan_id": scan_id,
+        "files_processed": session.files_processed,
+        "files_total": session.files_total,
         "total_photos": session.total_photos,
         "exact_duplicates": session.exact_duplicates,
-        "visual_duplicates": session.visual_duplicates
+        "visual_duplicates": session.visual_duplicates,
+        "duplicate_groups": len(session.duplicate_groups),
+        "error_message": session.error_message
     }
 
 @app.get("/scan/results")
@@ -165,7 +177,12 @@ async def get_results(scan_id: str):
         )
     
     session = scan_results[scan_id]
-    
+    if session.status != "completed":
+        return JSONResponse(
+            status_code=409,
+            content={"status": "error", "message": "Scan is not complete yet"}
+        )
+
     groups = []
     for group in session.duplicate_groups:
         photo_details = []
