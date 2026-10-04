@@ -7,6 +7,10 @@ function Check([bool]$cond, [string]$msg) {
     if ($cond) { Write-Host "PASS  $msg" -ForegroundColor Green }
     else { Write-Host "FAIL  $msg" -ForegroundColor Red; $script:failed = $true }
 }
+function Get-HttpStatus([scriptblock]$call) {
+    try { $null = & $call; return 200 }
+    catch { if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode } else { return -1 } }
+}
 
 $dir = Join-Path $env:TEMP ('prism_smoke_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
@@ -21,14 +25,30 @@ try {
     $stats = Invoke-RestMethod "$BaseUrl/stats" -TimeoutSec 5 -ErrorAction Stop
     Check ($null -ne $stats.completed_scans) '/stats responds'
 
-    $body = @{ folder_path = $dir } | ConvertTo-Json
-    $scan = Invoke-RestMethod "$BaseUrl/scan/start" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 120 -ErrorAction Stop
-    Check ($scan.total_photos -eq 3) "scan found 3 photos (got $($scan.total_photos))"
-    Check ($scan.exact_duplicates -eq 1) "1 exact duplicate (got $($scan.exact_duplicates))"
-    Check ($scan.visual_duplicates -eq 0) "0 visual duplicates (got $($scan.visual_duplicates))"
-    Check ($scan.duplicate_groups -eq 1) "1 duplicate group (got $($scan.duplicate_groups))"
+    $badBody = @{ folder_path = 'C:\this\folder\does\not\exist' } | ConvertTo-Json
+    $code = Get-HttpStatus { Invoke-RestMethod "$BaseUrl/scan/start" -Method Post -ContentType 'application/json' -Body $badBody -TimeoutSec 10 -ErrorAction Stop }
+    Check ($code -eq 400) "nonexistent folder is rejected with 400 (got $code)"
 
-    $res = Invoke-RestMethod "$BaseUrl/scan/results?scan_id=$($scan.scan_id)" -ErrorAction Stop
+    $code = Get-HttpStatus { Invoke-RestMethod "$BaseUrl/scan/progress?scan_id=does-not-exist" -TimeoutSec 10 -ErrorAction Stop }
+    Check ($code -eq 404) "unknown scan id returns 404 (got $code)"
+
+    $body = @{ folder_path = $dir } | ConvertTo-Json
+    $start = Invoke-RestMethod "$BaseUrl/scan/start" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10 -ErrorAction Stop
+    Check (($start.status -eq 'started') -and $start.scan_id) '/scan/start returns "started" and a scan_id immediately'
+
+    $deadline = (Get-Date).AddSeconds(120)
+    do {
+        Start-Sleep -Milliseconds 300
+        $prog = Invoke-RestMethod "$BaseUrl/scan/progress?scan_id=$($start.scan_id)" -TimeoutSec 10 -ErrorAction Stop
+    } while ($prog.status -eq 'in_progress' -and (Get-Date) -lt $deadline)
+
+    Check (($prog.status -eq 'completed') -and ($prog.phase -eq 'completed')) "scan completes (status=$($prog.status), phase=$($prog.phase))"
+    Check ($prog.total_photos -eq 3) "scan found 3 photos (got $($prog.total_photos))"
+    Check ($prog.exact_duplicates -eq 1) "1 exact duplicate (got $($prog.exact_duplicates))"
+    Check ($prog.visual_duplicates -eq 0) "0 visual duplicates (got $($prog.visual_duplicates))"
+    Check ($prog.duplicate_groups -eq 1) "1 duplicate group (got $($prog.duplicate_groups))"
+
+    $res = Invoke-RestMethod "$BaseUrl/scan/results?scan_id=$($start.scan_id)" -ErrorAction Stop
     $group = $res.groups[0]
     Check (@($group.photos).Count -eq 2) 'group has 2 photos'
 
@@ -36,7 +56,7 @@ try {
     $thumb = Invoke-WebRequest -UseBasicParsing ("$BaseUrl/thumbnail?path=" + [uri]::EscapeDataString($img)) -ErrorAction Stop
     Check (($thumb.StatusCode -eq 200) -and (([string]$thumb.Headers['Content-Type']) -like 'image/jpeg*')) '/thumbnail returns a JPEG'
 
-    $delBody = @{ scan_id = $scan.scan_id; group_ids = @($group.id) } | ConvertTo-Json
+    $delBody = @{ scan_id = $start.scan_id; group_ids = @($group.id) } | ConvertTo-Json
     $del = Invoke-RestMethod "$BaseUrl/scan/delete" -Method Post -ContentType 'application/json' -Body $delBody -ErrorAction Stop
     Check ($del.files_deleted -eq 1) "1 file deleted (got $($del.files_deleted))"
     $left = @(Get-ChildItem $dir -File).Count
