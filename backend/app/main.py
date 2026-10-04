@@ -2,13 +2,37 @@
 PRISM Backend - FastAPI server with IPC messaging from Tauri
 """
 import sys
-import io
+import os
+import argparse
+import multiprocessing
+import threading
 
-# Force UTF-8 encoding for stdout/stderr on Windows
-if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
+def _setup_std_streams():
+    """Make print() and tracebacks safe in the packaged (windowed) build.
+
+    The packaged backend has no console and the Prism app does not read its output, so
+    everything goes to backend.log in the data directory. In development (a normal console)
+    the streams are only forced to UTF-8.
+    """
+    frozen = getattr(sys, "frozen", False)
+    if frozen or sys.stdout is None or sys.stderr is None:
+        data_dir = os.environ.get("PRISM_DATA_DIR") or os.path.join(os.path.expanduser("~"), ".prism")
+        os.makedirs(data_dir, exist_ok=True)
+        log_path = os.path.join(data_dir, "backend.log")
+        mode = "w" if os.path.exists(log_path) and os.path.getsize(log_path) > 5 * 1024 * 1024 else "a"
+        log = open(log_path, mode, encoding="utf-8", errors="replace", buffering=1)
+        sys.stdout = log
+        sys.stderr = log
+    else:
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+_setup_std_streams()
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +43,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from models.scan import ScanSession, PhotoRecord, DuplicateGroup
-from services.services import FolderScanner, ScanProgress, VisualDeduper, SafeDeleter
+from services.services import FolderScanner, ScanProgress, Deduper, SafeDeleter
 
 app = FastAPI(
     title="PRISM Backend",
@@ -37,7 +61,7 @@ app.add_middleware(
 
 config = Config()
 scanner = FolderScanner(config)
-deduper: Optional[VisualDeduper] = None
+deduper = Deduper(config)
 deleter = SafeDeleter(config)
 
 current_scan: Optional[ScanSession] = None
@@ -55,7 +79,7 @@ async def health():
 @app.post("/scan/start")
 async def start_scan(request_data: dict):
     """Start a new scan session"""
-    global current_scan, deduper
+    global current_scan
     
     try:
         folder_path = request_data.get("folder_path", "").strip()
@@ -67,14 +91,12 @@ async def start_scan(request_data: dict):
         
         print(f"Starting scan: {folder_path}")
         
-        if deduper is None:
-            deduper = VisualDeduper(config)
-        
         current_scan = ScanSession(folder_path=folder_path)
         
         print("Step 1: Scanning folder...")
         def scanner_progress(progress: ScanProgress):
-            print(f"  Progress: {progress.files_processed}/{progress.total_files_found} files processed")
+            if progress.files_processed % 100 == 0 or progress.files_processed == progress.total_files_found:
+                print(f"  Progress: {progress.files_processed}/{progress.total_files_found} files processed")
         
         current_scan = scanner.scan_folder(folder_path, current_scan, scanner_progress)
         
@@ -272,11 +294,45 @@ async def get_stats():
     return {
         "completed_scans": len(scan_results),
         "total_scans_processed": len(scan_results),
-        "db_path": str(config.DB_PATH),
-        "clip_model": config.CLIP_MODEL,
-        "clip_device": config.CLIP_DEVICE
+        "db_path": str(config.DB_PATH)
     }
 
+def _watch_parent(pid: int):
+    """Exit when the Prism app (our parent) exits.
+
+    A PyInstaller --onefile exe is a launcher plus a child process. If the app only kills the
+    launcher, the child could survive. Watching the app's PID closes that gap.
+    """
+    if sys.platform != "win32":
+        return
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.OpenProcess.restype = wintypes.HANDLE
+    k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    k32.WaitForSingleObject.restype = wintypes.DWORD
+    k32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+    handle = k32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+    if not handle:
+        if ctypes.get_last_error() == 87:  # ERROR_INVALID_PARAMETER: that process no longer exists
+            os._exit(0)
+        return  # cannot watch it (for example access denied): keep running
+    k32.WaitForSingleObject(handle, 0xFFFFFFFF)
+    os._exit(0)
+
+
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--parent-pid", type=int, default=0)
+    args = parser.parse_args()
+    if args.parent_pid:
+        threading.Thread(target=_watch_parent, args=(args.parent_pid,), daemon=True).start()
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")
+    uvicorn.run(
+        app,
+        host="127.0.0.1",
+        port=args.port,
+        log_level="warning" if getattr(sys, "frozen", False) else "info",
+    )

@@ -111,3 +111,7 @@ photos/
 
 # Rust / Tauri build output
 src-tauri/target/
+backend/build/
+backend/dist/
+backend/venv-release/
+src-tauri/binaries/
