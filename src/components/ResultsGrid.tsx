@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Check, Trash2, Image as ImageIcon, Loader2 } from 'lucide-react';
 import type { DuplicateGroup } from '../types';
+import { api } from '../services/api';
 
 interface ResultsGridProps {
   groups: DuplicateGroup[];
@@ -140,7 +141,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                       </span>
                     </div>
                     <img
-                      src={`http://127.0.0.1:8000/thumbnail?path=${encodeURIComponent(keptPhoto.file_path)}`}
+                      src={api.thumbnailUrl(keptPhoto.file_path)}
                       alt={keptPhoto.file_path}
                       loading="lazy"
                       className="w-full h-40 object-contain bg-slate-200 dark:bg-slate-800 rounded mb-2"
@@ -168,7 +169,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                       </span>
                     </div>
                     <img
-                      src={`http://127.0.0.1:8000/thumbnail?path=${encodeURIComponent(photo.file_path)}`}
+                      src={api.thumbnailUrl(photo.file_path)}
                       alt={photo.file_path}
                       loading="lazy"
                       className="w-full h-40 object-contain bg-slate-200 dark:bg-slate-800 rounded mb-2"
