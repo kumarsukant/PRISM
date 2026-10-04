@@ -10,15 +10,6 @@ import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image
-import numpy as np
-from scipy.spatial.distance import cosine
-
-# CLIP imports
-try:
-    import open_clip
-    CLIP_AVAILABLE = True
-except ImportError:
-    CLIP_AVAILABLE = False
 
 @dataclass
 class ScanProgress:
@@ -118,37 +109,24 @@ class FolderScanner:
             print(f"Error processing {file_path}: {e}")
             return None
 
-class VisualDeduper:
-    """Finds exact and visual duplicates using MD5 and CLIP"""
-    
-    VISUAL_MATCH_THRESHOLD = 0.05  # Cosine distance threshold
-    
+class Deduper:
+    """Finds duplicate photos. v0.1: exact matches by MD5. Near-duplicates (perceptual hash) arrive in v0.2."""
+
     def __init__(self, config: Config):
         self.config = config
-        self.model = None
-        self.processor = None
-        self._load_clip_model()
-    
-    def _load_clip_model(self):
-        """Load CLIP model"""
-        if not CLIP_AVAILABLE:
-            print("Warning: open_clip not available. Visual deduplication will be skipped.")
-            return
-        
+
+    @staticmethod
+    def _keeper_sort_key(photo: PhotoRecord):
+        """Deterministic keeper choice: shortest filename, then oldest creation time, then path.
+
+        So '3.jpeg' beats '3 - Copy.jpeg' on every run, no matter which file finished hashing first.
+        """
         try:
-            model_name = self.config.CLIP_MODEL
-            print(f"Loading CLIP model: {model_name} on {self.config.CLIP_DEVICE}...")
-            
-            self.model, _, self.processor = open_clip.create_model_and_transforms(
-                model_name,
-                device=self.config.CLIP_DEVICE
-            )
-            self.model.eval()
-            print(f"✓ CLIP model loaded")
-        except Exception as e:
-            print(f"Warning: Could not load CLIP model: {e}")
-            self.model = None
-    
+            created = os.path.getctime(photo.file_path)
+        except OSError:
+            created = float("inf")
+        return (len(os.path.basename(photo.file_path)), created, photo.file_path.lower())
+
     def find_exact_duplicates(self, session: ScanSession) -> ScanSession:
         """Find exact duplicates by MD5 hash"""
         print("Finding exact duplicates by MD5...")
@@ -163,11 +141,12 @@ class VisualDeduper:
         exact_count = 0
         for md5_hash, photos in hash_groups.items():
             if len(photos) > 1:
+                photos = sorted(photos, key=self._keeper_sort_key)
                 group = DuplicateGroup(
                     group_type="exact",
                     confidence_score=1.0,
                     photo_ids=[p.id for p in photos],
-                    kept_photo_id=photos[0].id  # Keep the first one
+                    kept_photo_id=photos[0].id  # first after sorting: shortest name, oldest, then path
                 )
                 session.duplicate_groups.append(group)
                 exact_count += len(photos) - 1
@@ -177,108 +156,9 @@ class VisualDeduper:
         return session
     
     def find_visual_duplicates(self, session: ScanSession) -> ScanSession:
-        """Find visual duplicates using CLIP embeddings"""
-        print("Finding visual duplicates...")
-        
-        if not self.model:
-            print("CLIP model not available, skipping visual deduplication")
-            session.visual_duplicates = 0
-            return session
-        
-        if len(session.photos) < 2:
-            session.visual_duplicates = 0
-            return session
-        
-        try:
-            # Compute embeddings for all photos
-            print(f"Computing CLIP embeddings for {len(session.photos)} photos...")
-            embeddings = []
-            valid_photos = []
-            
-            for photo in session.photos:
-                try:
-                    with Image.open(photo.file_path) as img:
-                        img_tensor = self.processor(img).unsqueeze(0).to(self.config.CLIP_DEVICE)
-                        
-                        with open_clip.set_model_to_eval(self.model):
-                            with np.no_grad():
-                                embedding = self.model.encode_image(img_tensor)
-                                embedding = embedding.cpu().numpy().flatten()
-                                embeddings.append(embedding)
-                                valid_photos.append(photo)
-                except Exception as e:
-                    print(f"Could not encode {photo.file_path}: {e}")
-                    continue
-            
-            print(f"Successfully computed embeddings for {len(embeddings)} photos")
-            
-            if len(embeddings) < 2:
-                session.visual_duplicates = 0
-                return session
-            
-            embeddings = np.array(embeddings)
-            
-            # Find visual duplicates using cosine distance
-            print("Computing cosine similarities...")
-            
-            # Normalize embeddings
-            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-            normalized_embeddings = embeddings / (norms + 1e-8)
-            
-            visual_count = 0
-            processed_indices = set()
-            
-            for i in range(len(normalized_embeddings)):
-                if i in processed_indices:
-                    continue
-                
-                # Compute distances to all other images
-                distances = []
-                for j in range(i + 1, len(normalized_embeddings)):
-                    if j not in processed_indices:
-                        # Use dot product on normalized vectors (equivalent to cosine similarity)
-                        # Distance = 1 - similarity
-                        similarity = np.dot(normalized_embeddings[i], normalized_embeddings[j])
-                        distance = 1.0 - similarity
-                        
-                        # Clamp to [0, 1]
-                        distance = max(0.0, min(1.0, distance))
-                        
-                        if distance < self.VISUAL_MATCH_THRESHOLD:
-                            distances.append((j, distance))
-                
-                if distances:
-                    # Sort by distance (closest first)
-                    distances.sort(key=lambda x: x[1])
-                    
-                    # Create group with all visual matches
-                    photo_indices = [i] + [j for j, _ in distances]
-                    duplicate_photo_ids = [valid_photos[idx].id for idx in photo_indices]
-                    
-                    group = DuplicateGroup(
-                        group_type="visual",
-                        confidence_score=float(1.0 - distances[0][1]),  # Confidence based on closest match
-                        photo_ids=duplicate_photo_ids,
-                        kept_photo_id=valid_photos[i].id
-                    )
-                    session.duplicate_groups.append(group)
-                    
-                    # Mark as processed
-                    for j, _ in distances:
-                        processed_indices.add(j)
-                    
-                    visual_count += len(distances)
-            
-            session.visual_duplicates = visual_count
-            print(f"Found {visual_count} visual duplicates")
-            return session
-            
-        except Exception as e:
-            print(f"Error during visual deduplication: {e}")
-            import traceback
-            traceback.print_exc()
-            session.visual_duplicates = 0
-            return session
+        """Near-duplicate detection is planned for v0.2 (perceptual hash)."""
+        session.visual_duplicates = 0
+        return session
 
 class SafeDeleter:
     """Safely deletes files by moving them to recycle bin"""

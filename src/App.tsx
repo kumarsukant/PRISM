@@ -7,7 +7,7 @@ import { ResultsGrid } from './components/ResultsGrid';
 import { api } from './services/api';
 import type { ScanStartResponse, ScanResults } from './types';
 
-type AppState = 'folder-select' | 'scanning' | 'results' | 'error';
+type AppState = 'starting' | 'folder-select' | 'scanning' | 'results' | 'error';
 
 interface AppData {
   state: AppState;
@@ -17,27 +17,29 @@ interface AppData {
 }
 
 function App() {
-  const [appData, setAppData] = useState<AppData>({ state: 'folder-select' });
+  const [appData, setAppData] = useState<AppData>({ state: 'starting' });
   const [isDeleting, setIsDeleting] = useState(false);
 
-  // Check backend health on mount
+  // Wait for the bundled backend to come up before showing anything
   useEffect(() => {
-    const checkBackend = async () => {
-      try {
-        await api.checkHealth();
-        console.log('✓ Backend is running');
-      } catch (error) {
-        console.error('Backend connection failed:', error);
+    let cancelled = false;
+    api
+      .waitForBackend()
+      .then(() => {
+        if (!cancelled) setAppData({ state: 'folder-select' });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error('Backend did not start:', error);
         setAppData({
           state: 'error',
-          error: 'Cannot connect to backend. Make sure the FastAPI server is running on http://127.0.0.1:8000',
+          error: error instanceof Error ? error.message : 'The backend did not start',
         });
-      }
+      });
+    return () => {
+      cancelled = true;
     };
-
-    checkBackend();
   }, []);
-
   const handleFolderSelect = async (folderPath: string) => {
     try {
       setAppData({ state: 'scanning' });
@@ -96,6 +98,16 @@ function App() {
   };
 
   // Render based on state
+  if (appData.state === 'starting') {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-amber-50 to-slate-50 dark:from-slate-950 dark:to-slate-900 flex items-center justify-center p-4">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-amber-200 dark:border-amber-800 border-t-amber-600 dark:border-t-amber-400 rounded-full animate-spin"></div>
+          <p className="text-slate-600 dark:text-slate-400">Starting Prism...</p>
+        </div>
+      </div>
+    );
+  }
   if (appData.state === 'folder-select') {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 to-slate-50 dark:from-slate-950 dark:to-slate-900 flex items-center justify-center p-4">

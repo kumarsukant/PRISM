@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Check, Trash2, Image as ImageIcon, Loader2 } from 'lucide-react';
 import type { DuplicateGroup } from '../types';
+import { api } from '../services/api';
 
 interface ResultsGridProps {
   groups: DuplicateGroup[];
@@ -109,7 +110,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                     <input
                       type="checkbox"
                       checked={isSelected}
-                      onChange={() => {}}
+                      onChange={() => handleToggleGroup(group.id)}
                       className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-amber-600 dark:text-amber-500 cursor-pointer"
                       onClick={(e) => e.stopPropagation()}
                     />
@@ -140,7 +141,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                       </span>
                     </div>
                     <img
-                      src={`http://127.0.0.1:8000/thumbnail?path=${encodeURIComponent(keptPhoto.file_path)}`}
+                      src={api.thumbnailUrl(keptPhoto.file_path)}
                       alt={keptPhoto.file_path}
                       loading="lazy"
                       className="w-full h-40 object-contain bg-slate-200 dark:bg-slate-800 rounded mb-2"
@@ -168,7 +169,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                       </span>
                     </div>
                     <img
-                      src={`http://127.0.0.1:8000/thumbnail?path=${encodeURIComponent(photo.file_path)}`}
+                      src={api.thumbnailUrl(photo.file_path)}
                       alt={photo.file_path}
                       loading="lazy"
                       className="w-full h-40 object-contain bg-slate-200 dark:bg-slate-800 rounded mb-2"
@@ -190,7 +191,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
 
       {/* Delete Summary */}
       {selectedGroupIds.size > 0 && (
-        <div className="mt-8 p-6 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+        <div className="sticky bottom-4 mt-8 p-6 bg-amber-50 dark:bg-amber-950 rounded-lg border border-amber-200 dark:border-amber-800 shadow-xl">
           <p className="text-sm font-semibold text-amber-900 dark:text-amber-200 mb-2">
             Delete Summary
           </p>
