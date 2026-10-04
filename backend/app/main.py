@@ -1,12 +1,18 @@
 ﻿"""
 PRISM Backend - FastAPI server with IPC messaging from Tauri
 """
-from fastapi import FastAPI, HTTPException
+import sys
+import io
+
+# Force UTF-8 encoding for stdout/stderr on Windows
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
+from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-import sys
 import os
-import json
 from typing import Optional, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -39,6 +45,7 @@ scan_results: dict[str, ScanSession] = {}
 
 @app.get("/health")
 async def health():
+    """Health check for IPC communication"""
     return {
         "status": "ok",
         "message": "PRISM backend is running",
@@ -46,10 +53,18 @@ async def health():
     }
 
 @app.post("/scan/start")
-async def start_scan(folder_path: str):
+async def start_scan(request_data: dict):
+    """Start a new scan session"""
     global current_scan, deduper
     
     try:
+        folder_path = request_data.get("folder_path", "").strip()
+        if not folder_path:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "error", "message": "folder_path is required in request body"}
+            )
+        
         print(f"Starting scan: {folder_path}")
         
         if deduper is None:
@@ -93,6 +108,8 @@ async def start_scan(folder_path: str):
         
     except Exception as e:
         print(f"Scan error: {e}")
+        import traceback
+        traceback.print_exc()
         return JSONResponse(
             status_code=400,
             content={"status": "error", "message": str(e)}
@@ -100,6 +117,7 @@ async def start_scan(folder_path: str):
 
 @app.get("/scan/progress")
 async def get_progress(scan_id: str):
+    """Get progress of current scan"""
     if scan_id not in scan_results:
         return JSONResponse(
             status_code=404,
@@ -116,7 +134,8 @@ async def get_progress(scan_id: str):
     }
 
 @app.get("/scan/results")
-async def get_results(scan_id: str, include_thumbnails: bool = False):
+async def get_results(scan_id: str):
+    """Get results of completed scan"""
     if scan_id not in scan_results:
         return JSONResponse(
             status_code=404,
@@ -153,16 +172,13 @@ async def get_results(scan_id: str, include_thumbnails: bool = False):
         "status": "complete",
         "scan_id": scan_id,
         "total_photos": session.total_photos,
-        "storage_freed_mb": round(sum(p.file_size_bytes for g in session.duplicate_groups 
-                                       for p_id in g.photo_ids 
-                                       if (p := next((x for x in session.photos if x.id == p_id), None))
-                                       and p_id != g.kept_photo_id) / (1024 * 1024), 2),
         "duplicate_groups": len(groups),
         "groups": groups
     }
 
 @app.post("/scan/delete")
 async def delete_duplicates(scan_id: str, group_ids: List[str]):
+    """Delete selected duplicate groups"""
     if scan_id not in scan_results:
         return JSONResponse(
             status_code=404,
@@ -193,6 +209,7 @@ async def delete_duplicates(scan_id: str, group_ids: List[str]):
 
 @app.get("/stats")
 async def get_stats():
+    """Get server statistics"""
     return {
         "completed_scans": len(scan_results),
         "total_scans_processed": len(scan_results),
