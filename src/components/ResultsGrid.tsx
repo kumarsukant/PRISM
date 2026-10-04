@@ -225,6 +225,3 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
     </div>
   );
 };
-
-// Small import we need
-import { Loader2 } from 'lucide-react';
