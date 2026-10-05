@@ -12,6 +12,20 @@ function Get-HttpStatus([scriptblock]$call) {
     catch { if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode } else { return -1 } }
 }
 
+function Send-Raw([string]$method, [string]$path, [hashtable]$headers, [string]$hostName = '') {
+    # HttpWebRequest, because Invoke-RestMethod cannot send a different Host header
+    $req = [System.Net.HttpWebRequest]::Create("$BaseUrl$path")
+    $req.Method = $method
+    $req.Timeout = 10000
+    foreach ($k in $headers.Keys) { $req.Headers.Add($k, $headers[$k]) }
+    if ($hostName) { $req.Host = $hostName }
+    try { $resp = $req.GetResponse() } catch [System.Net.WebException] { $resp = $_.Exception.Response }
+    if (-not $resp) { return @{ Status = -1; AllowOrigin = $null } }
+    $result = @{ Status = [int]$resp.StatusCode; AllowOrigin = $resp.Headers['Access-Control-Allow-Origin'] }
+    $resp.Close()
+    return $result
+}
+
 $dir = Join-Path $env:TEMP ('prism_smoke_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
 $mk = "import os, sys; from PIL import Image; d = sys.argv[1]; [Image.frombytes('RGB', (128, 128), os.urandom(128*128*3)).save(os.path.join(d, n)) for n in ('a.png', 'c.png', 'd.png')]"
@@ -27,6 +41,18 @@ try {
 
     $stats = Invoke-RestMethod "$BaseUrl/stats" -TimeoutSec 5 -ErrorAction Stop
     Check ($null -ne $stats.completed_scans) '/stats responds'
+
+    # Who may call the backend: the app's and dev server's origins only, and only Host 127.0.0.1/localhost
+    $evil = Send-Raw 'OPTIONS' '/scan/start' @{ Origin = 'https://example.com'; 'Access-Control-Request-Method' = 'POST' }
+    Check (($evil.Status -eq 403) -and (-not $evil.AllowOrigin)) "preflight from https://example.com is refused (got $($evil.Status), allow-origin '$($evil.AllowOrigin)')"
+    $okApp = Send-Raw 'OPTIONS' '/scan/start' @{ Origin = 'http://tauri.localhost'; 'Access-Control-Request-Method' = 'POST'; 'Access-Control-Request-Headers' = 'content-type' }
+    $okDev = Send-Raw 'OPTIONS' '/scan/start' @{ Origin = 'http://localhost:5173'; 'Access-Control-Request-Method' = 'POST'; 'Access-Control-Request-Headers' = 'content-type' }
+    Check (($okApp.Status -eq 200) -and ($okApp.AllowOrigin -eq 'http://tauri.localhost') -and ($okDev.AllowOrigin -eq 'http://localhost:5173')) "preflight from the app (tauri.localhost) and dev server (localhost:5173) is allowed (got $($okApp.Status) '$($okApp.AllowOrigin)', '$($okDev.AllowOrigin)')"
+    $evilGet = Send-Raw 'GET' '/health' @{ Origin = 'https://evil.example' }
+    Check ($evilGet.Status -eq 403) "a simple GET from another web page is refused (got $($evilGet.Status))"
+    $badHost = Send-Raw 'GET' '/health' @{} 'evil.example'
+    $okHost = Send-Raw 'GET' '/health' @{} 'localhost'
+    Check (($badHost.Status -eq 400) -and ($okHost.Status -eq 200)) "Host evil.example is refused, Host localhost accepted (got $($badHost.Status), $($okHost.Status))"
 
     $badBody = @{ folder_path = 'C:\this\folder\does\not\exist' } | ConvertTo-Json
     $code = Get-HttpStatus { Invoke-RestMethod "$BaseUrl/scan/start" -Method Post -ContentType 'application/json' -Body $badBody -TimeoutSec 10 -ErrorAction Stop }

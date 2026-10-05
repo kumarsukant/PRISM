@@ -36,7 +36,9 @@ _setup_std_streams()
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 import os
+import re
 from typing import Optional, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -52,13 +54,41 @@ app = FastAPI(
     description="AI-powered photo deduplication backend"
 )
 
+# Who may call the backend from a web page: the installed app (Tauri serves it from http://tauri.localhost on
+# Windows; https:// and tauri://localhost are the other forms Tauri uses) and the dev server (localhost or
+# 127.0.0.1, any port). NOTE: `tauri dev` loads http://localhost:5173, so it never exercises the tauri.localhost
+# origin; only the installed MSI does. Test the installed app before sharing a build.
+ALLOWED_ORIGIN = re.compile(r"^(https?://tauri\.localhost|tauri://localhost|https?://(localhost|127\.0\.0\.1)(:\d{1,5})?)$")
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origin_regex=ALLOWED_ORIGIN.pattern,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
+
+
+_refused_origins: set = set()
+
+
+@app.middleware("http")
+async def refuse_foreign_origins(request, call_next):
+    """A request from any other web page is refused outright (CORS alone would only hide the answer).
+    Requests without an Origin (thumbnails in <img>, the app's Rust side, scripts) are not affected."""
+    origin = request.headers.get("origin")
+    if origin is not None and not ALLOWED_ORIGIN.match(origin):
+        if origin not in _refused_origins:  # log each origin once, so a hostile page cannot flood the log
+            _refused_origins.add(origin)
+            print(f"Refused request from origin {origin!r}: {request.method} {request.url.path}")
+        return JSONResponse(status_code=403, content={"status": "error", "message": "Origin not allowed"})
+    return await call_next(request)
+
+
+# Outermost: only Host 127.0.0.1 or localhost (any port), against DNS-rebinding pages that reach the port
+# under their own domain name. Other hosts get 400 "Invalid host header".
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
 config = Config()
 scanner = FolderScanner(config)
