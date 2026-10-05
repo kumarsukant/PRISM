@@ -239,7 +239,11 @@ The branch itself has not been pushed (its commits reached GitHub through the CP
 7. `b223774 build: run the backend unit tests in the import-gate stage, before PyInstaller`
 8. the commit that adds this update to the docs (`docs: ...`; see `git log`)
 
-Commits 2 to 8 are local only. Merge order: CP6 to `main` first (tag `v0.1.2-cp6`), then CP7 (tag `v0.1.3-cp7`); see 11.
+Merges (2026-10-05, after the owner's 11-step installed-app test passed):
+- **`2de3458 Checkpoint 6: pagination, in-place delete, skipped-files report`**, tag **`v0.1.2-cp6`**.
+- **`8faacf8 Checkpoint 7: dark mode follows Windows, polish`**, tag **`v0.1.3-cp7`**.
+- **CP6 was tested inside the CP7 installer.** No separate CP6 exe or MSI was built: the one installer was built from `checkpoint-7-dark-mode` @ `e4151b2`, which contains every CP6 commit, and `main`'s tree after the CP7 merge is identical to it (`git diff e4151b2 8faacf8` is empty). The tag `v0.1.2-cp6` marks the code, not a separately tested installer.
+- Followed on `main` by the commit that adds this update to the docs (`docs: ...`; see `git log`).
 
 ## 6. Chronology: what happened, in order
 
@@ -335,6 +339,7 @@ The owner noticed that the copy-paste loop (assistant writes a patch script, own
 - *PR attempt.* The owner chose "Create PR". The branch was pushed at `67868bb` (first time the CP6 commits reached GitHub), but `gh` is not installed, so no PR was opened; the title and body were drafted for the owner to paste at `https://github.com/kumarsukant/PRISM/pull/new/checkpoint-7-dark-mode` (or install `gh` with `winget install GitHub.cli` and `gh auth login`). Later commits are not pushed.
 - *Testing lessons from this checkpoint:* Vite served a stale `api.ts` (the watcher missed the second of two quick saves), giving `errorMessage is not defined` even after a reload; fixed by restarting the dev server, and diagnosed by fetching the served module. The browser pane re-syncs its colour-scheme emulation to the app theme, so a "light" reading once came back with dark colours: check `matchMedia('(prefers-color-scheme: dark)')` in the same call as every measurement. With the pane hidden, screenshots go stale and CSS transitions freeze mid-way (a selected card read as the dark tint until its transition was finished).
 - *Not verified (owner will):* the native window and Windows title bar in both themes; anything in the installed MSI.
+- *Release (2026-10-05).* The owner passed the native dark-mode checks; on Claude's recommendation one installer was built from `checkpoint-7-dark-mode` @ `e4151b2` instead of a CP6-only one first: `build-backend.ps1` BUILD OK (21.1 MB; stage 2 ran 7 unit tests OK; the frozen exe passed 20/20 smoke checks), then `npm run tauri build` (MSI 24.65 MiB, 96 s newer than the exe, bundled backend byte-identical to the sidecar, no High Mandatory label). The owner uninstalled the old PRISM, installed the MSI and passed an 11-step installed-app test. Then CP6 and CP7 were merged to `main` in that order (`2de3458`, `8faacf8`) and tagged `v0.1.2-cp6` / `v0.1.3-cp7`; CP6 was therefore tested inside the CP7 installer (see 5). The app still reports version 0.1.0 (backlog: bump the version per release).
 
 ## 7. Decisions log (with reasoning)
 
@@ -422,13 +427,11 @@ From reading the code (not tested; treat as hypotheses):
 
 ## 11. Backlog and roadmap
 
-**Immediate (Checkpoint 6 wrap-up)**
+**Immediate (Checkpoints 6 and 7 wrap-up)**
 1. ✔ Summary strip + status line + skipped-files notice; pager scrolls to the list (done 2026-10-05: `098df1e`, `eed8354`, `5c4611d`).
-2. Owner tests in `tauri dev` (native dialog, locked-file scan notice, locked-file delete failure), then rebuild exe and MSI (non-elevated terminal, exe first), install, verify the installed app (pagination, stay-on-results, banner, clean shutdown), merge to `main` with `--no-ff` (`Checkpoint 6: ...`), tag `v0.1.2-cp6`, push.
-
-**Merge order (decided 2026-10-05):** Checkpoint 6 first, then Checkpoint 7.
-1. CP6: owner tests in `tauri dev`; build exe then MSI from `checkpoint-6-pagination` (normal terminal); install and verify; ask, then merge to `main` with `--no-ff` (`Checkpoint 6: ...`), tag **`v0.1.2-cp6`**, push.
-2. CP7: owner checks the native window and title bar in both themes; build exe then MSI from `checkpoint-7-dark-mode` (already contains CP6, no rebase needed); install and verify; ask, then merge with `--no-ff` (`Checkpoint 7: ...`), tag **`v0.1.3-cp7`**, push. Open the CP7 PR (needs `gh`, or paste the drafted text on GitHub); before the CP6 merge it also lists CP6's commits.
+2. ✔ Owner tests, one exe + MSI from `checkpoint-7-dark-mode`, 11-step installed-app test, merges CP6 then CP7 to `main` with tags `v0.1.2-cp6` and `v0.1.3-cp7` (done 2026-10-05; CP6 tested inside the CP7 installer, see 5 and 6.6).
+3. Push `main` and both tags (ask first). The drafted CP7 PR is no longer needed.
+4. **Bump the app version per release.** `tauri.conf.json`, `package.json` and `Cargo.toml` all still say 0.1.0 while the tags reached 0.1.3, so every MSI is "PRISM 0.1.0" and Windows will not upgrade in place (uninstall first). Set the version to match the release (for example 0.1.4 for the next tag) in all three files as part of each release, before `npm run tauri build`; the MSI file name follows it.
 
 **Owner's roadmap, in his chosen order**
 2. Pagination ✔ (in CP6)
