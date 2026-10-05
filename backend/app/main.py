@@ -43,7 +43,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from models.scan import ScanSession, PhotoRecord, DuplicateGroup
-from services.services import FolderScanner, ScanProgress, Deduper, SafeDeleter
+from services.services import FolderScanner, ScanProgress, Deduper, SafeDeleter, file_attributes, is_online_only
+from services.insights import build_insights, coverage_summary, find_folder
 
 app = FastAPI(
     title="PRISM Backend",
@@ -166,8 +167,42 @@ async def get_progress(scan_id: str):
         "duplicate_groups": len(session.duplicate_groups),
         "skipped_count": len(session.skipped_files),
         "skipped": session.skipped_files[:20],
+        "coverage": coverage_summary(session),
         "error_message": session.error_message
     }
+
+
+def _completed_session(scan_id: str):
+    """(session, None) for a finished scan, or (None, error response)."""
+    session = scan_results.get(scan_id)
+    if session is None:
+        return None, JSONResponse(status_code=404, content={"status": "error", "message": "Scan not found"})
+    if session.status != "completed":
+        return None, JSONResponse(status_code=409, content={"status": "error", "message": "Scan is not complete yet"})
+    return session, None
+
+
+@app.get("/scan/insights")
+def get_insights(scan_id: str):
+    """Where the duplicates are: folders, folder pairs, tips and coverage. Read-only, computed on
+    demand from the session, so it reflects deletes. Plain def: it runs in a worker thread."""
+    session, error = _completed_session(scan_id)
+    if error:
+        return error
+    return build_insights(session)
+
+
+@app.get("/scan/folder")
+def get_folder(scan_id: str, folder_id: str):
+    """The absolute path of a folder holding photos in this scan, for the app's Open folder command.
+    Unknown ids get 404, so only folders that are part of the scan can be opened."""
+    session, error = _completed_session(scan_id)
+    if error:
+        return error
+    path = find_folder(session, folder_id)
+    if path is None:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Folder is not part of this scan"})
+    return {"status": "ok", "path": path}
 
 @app.get("/scan/results")
 async def get_results(scan_id: str):
@@ -315,6 +350,12 @@ async def get_thumbnail(path: str):
     cached = cache_dir / f"{key}.jpg"
 
     if not cached.exists():
+        # Never open an online-only file: that would download it from the cloud
+        if is_online_only(file_attributes(path)):
+            return JSONResponse(
+                status_code=409,
+                content={"status": "error", "message": "This file is online-only; Prism does not download it"}
+            )
         try:
             with Image.open(path) as img:
                 img.draft("RGB", (600, 600))

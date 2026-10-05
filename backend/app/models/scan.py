@@ -54,5 +54,6 @@ class ScanSession:
     files_processed: int = 0
     files_total: int = 0
     skipped_files: list[dict] = field(default_factory=list)  # [{file, path, reason}] the scanner could not read
+    coverage: dict = field(default_factory=dict)  # files not scanned (heic, raw, under_10kb, online_only) + what was checked
     photos: list[PhotoRecord] = field(default_factory=list)
     duplicate_groups: list[DuplicateGroup] = field(default_factory=list)
