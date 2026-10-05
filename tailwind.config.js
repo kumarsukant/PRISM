@@ -21,6 +21,7 @@
       },
     },
   },
-  darkMode: 'class',
+  // Follow the Windows light/dark setting (prefers-color-scheme) instead of a class nobody sets
+  darkMode: 'media',
   plugins: [],
 }
