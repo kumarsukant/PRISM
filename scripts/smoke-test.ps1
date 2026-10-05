@@ -61,6 +61,11 @@ try {
     Check ($del.files_deleted -eq 1) "1 file deleted (got $($del.files_deleted))"
     $left = @(Get-ChildItem $dir -File).Count
     Check ($left -eq 2) "2 files remain on disk (got $left); the duplicate went to the Recycle Bin"
+    Check (($del.duplicate_groups -eq 0) -and ($del.total_photos -eq 2)) "delete response carries the updated counts (groups=$($del.duplicate_groups), photos=$($del.total_photos))"
+    $res2 = Invoke-RestMethod "$BaseUrl/scan/results?scan_id=$($start.scan_id)" -ErrorAction Stop
+    Check (@($res2.groups).Count -eq 0) 'the deleted group is gone from /scan/results'
+    $del2 = Invoke-RestMethod "$BaseUrl/scan/delete" -Method Post -ContentType 'application/json' -Body $delBody -ErrorAction Stop
+    Check ($del2.files_deleted -eq 0) 'deleting the same group again removes nothing'
 }
 catch {
     Write-Host "FAIL  exception: $($_.Exception.Message)" -ForegroundColor Red
