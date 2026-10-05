@@ -1,9 +1,13 @@
 // src/components/ResultsGrid.tsx
 
-import React, { useState } from 'react';
-import { Check, Trash2, Image as ImageIcon, Loader2 } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Check, ChevronLeft, ChevronRight, Trash2, Loader2 } from 'lucide-react';
 import type { DuplicateGroup } from '../types';
 import { api } from '../services/api';
+
+// How many duplicate groups are shown at once. A small page keeps the window responsive and
+// only loads thumbnails for the groups you are actually looking at.
+const PAGE_SIZE = 20;
 
 interface ResultsGridProps {
   groups: DuplicateGroup[];
@@ -19,74 +23,151 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
   isDeleting,
 }) => {
   const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set());
+  const [page, setPage] = useState(1);
+
+  const totalPages = Math.max(1, Math.ceil(groups.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const startIndex = (currentPage - 1) * PAGE_SIZE;
+  const pageGroups = groups.slice(startIndex, startIndex + PAGE_SIZE);
+  const pageIds = pageGroups.map((g) => g.id);
+
+  // Jump back to the top of the list whenever the page changes
+  useEffect(() => {
+    window.scrollTo({ top: 0 });
+  }, [currentPage]);
+
+  // Forget selected groups that are no longer in the list
+  useEffect(() => {
+    setSelectedGroupIds((previous) => {
+      const valid = new Set(groups.map((g) => g.id));
+      const kept = Array.from(previous).filter((id) => valid.has(id));
+      return kept.length === previous.size ? previous : new Set(kept);
+    });
+  }, [groups]);
+
+  const updateSelection = (next: Set<string>) => {
+    setSelectedGroupIds(next);
+    onSelectGroups(Array.from(next));
+  };
 
   const handleToggleGroup = (groupId: string) => {
-    const newSelected = new Set(selectedGroupIds);
-    if (newSelected.has(groupId)) {
-      newSelected.delete(groupId);
+    const next = new Set(selectedGroupIds);
+    if (next.has(groupId)) {
+      next.delete(groupId);
     } else {
-      newSelected.add(groupId);
+      next.add(groupId);
     }
-    setSelectedGroupIds(newSelected);
-    onSelectGroups(Array.from(newSelected));
+    updateSelection(next);
   };
 
-  const handleSelectAll = () => {
-    if (selectedGroupIds.size === groups.length) {
-      setSelectedGroupIds(new Set());
-      onSelectGroups([]);
+  const allOnPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedGroupIds.has(id));
+
+  const handleTogglePage = () => {
+    const next = new Set(selectedGroupIds);
+    if (allOnPageSelected) {
+      pageIds.forEach((id) => next.delete(id));
     } else {
-      const allIds = new Set(groups.map((g) => g.id));
-      setSelectedGroupIds(allIds);
-      onSelectGroups(Array.from(allIds));
+      pageIds.forEach((id) => next.add(id));
     }
+    updateSelection(next);
   };
 
-  const calculateTotalSize = (groupIds: string[]) => {
-    let totalBytes = 0;
-    groupIds.forEach((groupId) => {
-      const group = groups.find((g) => g.id === groupId);
-      if (group) {
-        // Count all non-kept photos
-        group.photos.forEach((photo) => {
-          if (!photo.is_kept) {
-            totalBytes += photo.file_size_bytes;
-          }
-        });
+  const handleSelectEverything = () => updateSelection(new Set(groups.map((g) => g.id)));
+  const handleClearSelection = () => updateSelection(new Set());
+
+  // Space freed by deleting the selected groups (every photo except the kept one)
+  const selectedBytes = useMemo(() => {
+    let total = 0;
+    for (const group of groups) {
+      if (!selectedGroupIds.has(group.id)) continue;
+      for (const photo of group.photos) {
+        if (!photo.is_kept) total += photo.file_size_bytes;
       }
-    });
-    return totalBytes;
-  };
+    }
+    return total;
+  }, [groups, selectedGroupIds]);
 
-  const selectedSize = calculateTotalSize(Array.from(selectedGroupIds));
-  const selectedSizeMb = (selectedSize / (1024 * 1024)).toFixed(2);
+  const selectedSizeMb = (selectedBytes / (1024 * 1024)).toFixed(2);
+  const selectedOnPage = pageIds.filter((id) => selectedGroupIds.has(id)).length;
+  const selectedElsewhere = selectedGroupIds.size - selectedOnPage;
+  const multiplePages = totalPages > 1;
+
+  const renderPager = () =>
+    multiplePages ? (
+      <div className="flex items-center justify-between gap-4 my-4">
+        <button
+          onClick={() => setPage(Math.max(1, currentPage - 1))}
+          disabled={currentPage === 1}
+          className="flex items-center gap-1 px-4 py-2 text-sm font-semibold rounded-lg border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 bg-white dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          Previous
+        </button>
+        <span className="text-sm font-semibold text-slate-600 dark:text-slate-400">
+          Page {currentPage} of {totalPages}
+        </span>
+        <button
+          onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+          disabled={currentPage === totalPages}
+          className="flex items-center gap-1 px-4 py-2 text-sm font-semibold rounded-lg border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 bg-white dark:bg-slate-800 hover:bg-amber-50 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Next
+          <ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+    ) : null;
 
   return (
     <div className="w-full max-w-4xl mx-auto p-8 bg-white dark:bg-slate-900 rounded-lg shadow-lg">
       {/* Header */}
-      <div className="mb-8">
+      <div className="mb-6">
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
           Duplicate Groups
         </h2>
         <p className="text-slate-600 dark:text-slate-400">
-          {groups.length} group{groups.length !== 1 ? 's' : ''} found.{' '}
+          {groups.length} group{groups.length !== 1 ? 's' : ''} found
+          {multiplePages
+            ? `. Showing ${startIndex + 1} to ${Math.min(startIndex + PAGE_SIZE, groups.length)}.`
+            : '.'}{' '}
           {selectedGroupIds.size > 0
             ? `${selectedGroupIds.size} group${selectedGroupIds.size !== 1 ? 's' : ''} selected for deletion (${selectedSizeMb} MB)`
             : 'Select groups to delete'}
         </p>
       </div>
 
-      {/* Select All */}
-      <button
-        onClick={handleSelectAll}
-        className="mb-6 text-sm font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300"
-      >
-        {selectedGroupIds.size === groups.length ? '✓ Deselect All' : '☐ Select All'}
-      </button>
+      {/* Selection controls */}
+      <div className="mb-2 flex flex-wrap items-center gap-x-6 gap-y-2">
+        <button
+          onClick={handleTogglePage}
+          className="text-sm font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300"
+        >
+          {allOnPageSelected
+            ? `\u2713 ${multiplePages ? 'Deselect this page' : 'Deselect all'}`
+            : `\u2610 ${multiplePages ? 'Select this page' : 'Select all'}`}
+        </button>
+        {multiplePages && selectedGroupIds.size < groups.length && (
+          <button
+            onClick={handleSelectEverything}
+            className="text-sm font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300"
+          >
+            Select all {groups.length} groups
+          </button>
+        )}
+        {selectedGroupIds.size > 0 && (
+          <button
+            onClick={handleClearSelection}
+            className="text-sm font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+          >
+            Clear selection
+          </button>
+        )}
+      </div>
+
+      {renderPager()}
 
       {/* Groups List */}
       <div className="space-y-4">
-        {groups.map((group) => {
+        {pageGroups.map((group) => {
           const isSelected = selectedGroupIds.has(group.id);
           const keptPhoto = group.photos.find((p) => p.is_kept);
           const duplicates = group.photos.filter((p) => !p.is_kept);
@@ -115,7 +196,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                       onClick={(e) => e.stopPropagation()}
                     />
                     <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
-                      {group.type === 'exact' ? '✓ Exact Match' : '≈ Visual Match'}
+                      {group.type === 'exact' ? '\u2713 Exact Match' : '\u2248 Visual Match'}
                     </span>
                     <span className="text-sm font-semibold text-amber-600 dark:text-amber-400">
                       {Math.round(group.confidence * 100)}% confidence
@@ -124,7 +205,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-bold text-red-600 dark:text-red-400">
-                    {duplicates.length} duplicate{duplicates.length !== 1 ? 's' : ''} • {duplicateSizeMb} MB
+                    {duplicates.length} duplicate{duplicates.length !== 1 ? 's' : ''} &bull; {duplicateSizeMb} MB
                   </p>
                 </div>
               </div>
@@ -150,8 +231,8 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                       {keptPhoto.file_path.split('\\').pop()}
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {(keptPhoto.file_size_bytes / 1024).toFixed(1)} KB •{' '}
-                      {keptPhoto.width}×{keptPhoto.height}
+                      {(keptPhoto.file_size_bytes / 1024).toFixed(1)} KB &bull;{' '}
+                      {keptPhoto.width}&times;{keptPhoto.height}
                     </p>
                   </div>
                 )}
@@ -178,8 +259,8 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                       {photo.file_path.split('\\').pop()}
                     </p>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      {(photo.file_size_bytes / 1024).toFixed(1)} KB •{' '}
-                      {photo.width}×{photo.height}
+                      {(photo.file_size_bytes / 1024).toFixed(1)} KB &bull;{' '}
+                      {photo.width}&times;{photo.height}
                     </p>
                   </div>
                 ))}
@@ -189,6 +270,8 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
         })}
       </div>
 
+      {renderPager()}
+
       {/* Delete Summary */}
       {selectedGroupIds.size > 0 && (
         <div className="sticky bottom-4 mt-8 p-6 bg-amber-50 dark:bg-amber-950 rounded-lg border border-amber-200 dark:border-amber-800 shadow-xl">
@@ -197,8 +280,9 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
           </p>
           <p className="text-sm text-amber-800 dark:text-amber-300 mb-4">
             You're about to delete {selectedGroupIds.size} group{selectedGroupIds.size !== 1 ? 's' : ''} of
-            duplicates ({selectedSizeMb} MB). This action moves files to Recycle Bin and can
-            be undone.
+            duplicates ({selectedSizeMb} MB)
+            {selectedElsewhere > 0 ? `, including ${selectedElsewhere} on other pages` : ''}. This action
+            moves files to Recycle Bin and can be undone.
           </p>
           <button
             onClick={() => onDelete(Array.from(selectedGroupIds))}
