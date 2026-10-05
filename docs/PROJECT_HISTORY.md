@@ -248,9 +248,13 @@ Merges (2026-10-05, after the owner's 11-step installed-app test passed):
 - **CP6 was tested inside the CP7 installer.** No separate CP6 exe or MSI was built: the one installer was built from `checkpoint-7-dark-mode` @ `e4151b2`, which contains every CP6 commit, and `main`'s tree after the CP7 merge is identical to it (`git diff e4151b2 8faacf8` is empty). The tag `v0.1.2-cp6` marks the code, not a separately tested installer.
 - Followed on `main` by the commit that adds this update to the docs (`docs: ...`; see `git log`).
 
-**Checkpoint 8, branch `checkpoint-8-version-bump`** (from `main` `3e9f885`; not merged): app version 0.1.0 → 0.2.0 → 0.1.4 and the "Releasing" section; see that branch's docs.
+**Checkpoint 8, branch `checkpoint-8-version-bump`** (from `main` `3e9f885`): app version 0.1.0 → 0.2.0 → 0.1.4 and the "Releasing" section.
+1. `fd3df41 chore: bump app version to 0.2.0 (MSI, Rust, npm, backend /health)`
+2. `e875d76 docs: Releasing section (bump the version before every MSI; tags are checkpoint markers)`
+3. `688e526 chore: use 0.1.4 so 0.2.0 stays reserved for near-duplicate detection`
+4. `ee8afb5 docs: version scheme (0.1.x exact duplicates, 0.2.0 near-duplicates, 0.3.0 AI Pack); app is 0.1.4`
 
-**Checkpoint 9, branch `checkpoint-9-insights`** (from `main` `3e9f885`; not merged, not pushed; see 6.7):
+**Checkpoint 9, branch `checkpoint-9-insights`** (from `main` `3e9f885`; see 6.7):
 1. `baaff97 docs: backlog the Reorganizer as a later, not-started item`
 2. `54de0fa feat: scan .tif files (only .tiff was recognised; .tif photos were silently ignored)`
 3. `37d9f05 feat: scan insights endpoint, coverage counters, never open online-only (cloud) files`
@@ -258,7 +262,13 @@ Merges (2026-10-05, after the owner's 11-step installed-app test passed):
 5. `5c087da test: nested insights test tree generator; smoke test checks /scan/insights and /scan/folder (20 -> 30 checks)`
 6. `e27a001 feat: Insights and Review duplicates tabs; Insights panel with headline, folders, pairs, tips and coverage`
 7. `fb83fcd feat: Open folder via the app's Rust side; backend accepts only the app's origins and loopback Host names`
-8. the commit that adds this update to the docs (`docs: ...`; see `git log`)
+8. `65b43e1 docs: Checkpoint 9 insights (definitions, online-only rule, Open folder, CORS/Host, measurements)`
+
+**Release PRISM 0.1.4, branch `release-candidate`** (from `main` `3e9f885`; see 6.8):
+- `bd2f165 Merge checkpoint-8-version-bump: app version 0.1.4, Releasing section and version scheme`, tag **`v0.1.4-cp8`** ("Checkpoint 8: version 0.1.4").
+- `3f400e2 Merge checkpoint-9-insights: scan insights, online-only guard, Open folder, CORS/Host`, tag **`v0.1.4-cp9`** ("Checkpoint 9: scan insights, online-only guard, Open folder, CORS/Host (installed and tested as PRISM 0.1.4)"). The `CLAUDE.md` sections 8-9 conflict was resolved by keeping both sides.
+- The commit that adds this update to the docs (`docs: ...`; see `git log`). Then `main` was fast-forwarded to `release-candidate` (`git merge --ff-only`), keeping both merge commits. Push only after the owner's approval: `main` first, then the two tags.
+- **Tag naming from here on:** the tag version follows the app version (`v0.1.4-cpN` for PRISM 0.1.4). The earlier tags `v0.1.0-cp4` to `v0.1.3-cp7` were checkpoint counters; all those apps said 0.1.0.
 
 ## 6. Chronology: what happened, in order
 
@@ -422,7 +432,36 @@ The owner noticed that the copy-paste loop (assistant writes a patch script, own
   - **No frontend test runner** (Python and PowerShell tests only), so tab accessibility was verified in the browser pane by script: roles, aria wiring, tabindex, and every key. Adding Vitest + Testing Library is on the backlog and needs the owner's OK (new dev dependencies).
   - **Vite crashed** with `EBUSY` while `cargo check` wrote `src-tauri\target` (the browser-pane server runs without polling); restarted.
   - **Screenshots:** the pane sometimes captured only the top-left quarter at 2× density; measurements were taken from the DOM.
-- *Not verified (owner will):* the real Open folder button and the window in `tauri dev`; the installed MSI (the release origin, the frozen backend's new routes and middleware). No exe or MSI was built in this checkpoint.
+- *Owner's checks (both passed):*
+  - **`tauri dev` (2026-10-05):** Insights numbers against an independent answer key, tabs, Open folder (including the error when a folder is missing), backend log clean.
+  - **Installed MSI:** see 6.8.
+
+### 6.8 Release PRISM 0.1.4: Checkpoints 8 and 9 together (2026-10-05/06)
+
+- *Branch.* Branch `release-candidate` was made from `main` `3e9f885`.
+  - **Merges:** `checkpoint-8-version-bump` (`bd2f165`), then `checkpoint-9-insights` (`3f400e2`), both `--no-ff`.
+  - **Conflict:** only `CLAUDE.md` sections 8-9, resolved by keeping both sides. The owner approved the resolved text before the commit.
+  - **Checks on the branch:** `tsc`, 40 unit tests, 9 Rust tests with `cargo test --lib --locked` (the lockfile did not drift), 34 smoke checks, `git diff --check` clean, no conflict markers anywhere. Nothing imports `backend/app/main_old.py`.
+- *Build (non-elevated, from `3f400e2`).*
+  - **Backend exe:** `build-backend.ps1` gave BUILD OK (21.1 MB): 40 unit tests in the import-gate stage, and 34/34 smoke checks on the frozen exe. The frozen backend's `backend.log` showed each refused origin logged once.
+  - **MSI:** `npm run tauri build` produced `PRISM_0.1.4_x64_en-US.msi` (25,939,968 bytes, 24.74 MiB), 154 s newer than the exe.
+  - **Bundled backend:** an administrative extract (`msiexec /a`) showed it byte-identical to the new exe (SHA256 `ABE97B53…FBCE1C46`, 22,104,025 bytes).
+  - **MSI properties** (read with the `WindowsInstaller.Installer` COM object): ProductVersion 0.1.4. UpgradeCode `{EE0682FA-B6AA-5198-891D-4F5FAB9253B8}`, the same as the 0.1.0 MSI. The Upgrade table detects any earlier version.
+  - **No elevation trap:** the MSI has no High Mandatory label. The old `PRISM_0.1.0_x64_en-US.msi` was kept.
+- *Installed-app test (owner, 2026-10-06): the owner reported all checks passed.*
+  - **Upgrade in place:** installed over 0.1.0 without uninstalling; **verified**.
+  - **Release origin:** `http://tauri.localhost`, which `tauri dev` never exercises; **verified**.
+  - **Insights and Open folder:** a renamed folder gave "Couldn't open Downloads: That folder no longer exists".
+  - **Themes:** light and dark, with live switching.
+  - **Also passed:** delete then Insights, the locked-file notice, a long path, clean shutdown.
+  - **No numbers:** the owner sent no exact figures, so none are recorded here.
+- *Then:*
+  - Docs updated on `release-candidate`.
+  - `main` fast-forwarded to it (`--ff-only`, keeping both merge commits).
+  - Annotated tags `v0.1.4-cp8` and `v0.1.4-cp9`.
+  - Push: `main` first, then the tags as a separate step, each only after the owner's approval.
+- *Tag naming decision (owner):* from here the tag version follows the app version. The earlier `v0.1.0-cp4` … `v0.1.3-cp7` were counters.
+- *Parked, still to do before any outside release:* the clean-machine install test on a friend's PC and the VM test (section 12, item 6; this PC is Windows 11 Home, with no Sandbox or Hyper-V).
 
 ## 7. Decisions log (with reasoning)
 
@@ -510,11 +549,12 @@ From reading the code (not tested; treat as hypotheses):
 
 ## 11. Backlog and roadmap
 
-**Immediate (Checkpoints 6 and 7 wrap-up)**
+**Immediate (Checkpoints 6 to 9 wrap-up)**
 1. ✔ Summary strip + status line + skipped-files notice; pager scrolls to the list (done 2026-10-05: `098df1e`, `eed8354`, `5c4611d`).
 2. ✔ Owner tests, one exe + MSI from `checkpoint-7-dark-mode`, 11-step installed-app test, merges CP6 then CP7 to `main` with tags `v0.1.2-cp6` and `v0.1.3-cp7` (done 2026-10-05; CP6 tested inside the CP7 installer, see 5 and 6.6).
 3. ✔ Pushed `main` (`902187a..3e9f885`) and both tags (2026-10-05). The drafted CP7 PR is no longer needed; the checkpoint branches stay on GitHub for now.
-4. **Bump the app version per release** (Checkpoint 8, branch `checkpoint-8-version-bump`, in progress). Until then `tauri.conf.json`, `package.json` and `Cargo.toml` all said 0.1.0 while the tags reached 0.1.3, so every MSI was "PRISM 0.1.0" and Windows would not upgrade in place (uninstall first). Bumped to **0.1.4** in all version files (list, rule and version scheme in `CLAUDE.md` "Releasing"): first to 0.2.0 (`fd3df41`), then, because the roadmap reserves 0.2 for near-duplicates, to 0.1.4 in a follow-up commit (`688e526`; history not rewritten). Scheme: 0.1.x = exact-duplicate releases (patch bump for every MSI that leaves the owner's PC), 0.2.0 = near-duplicate detection, 0.3.0 = the AI Pack; `v0.1.X-cpN` tags are checkpoint markers, never app versions. Remaining: build exe then MSI, owner tests an upgrade in place over the installed 0.1.0, then merge, tag, push (ask first).
+4. ✔ **Bump the app version per release** (Checkpoint 8; shipped as PRISM 0.1.4, upgrade in place over 0.1.0 verified by the owner in the installed app, 2026-10-06; see 6.8). Tag naming changed with it: from CP8 on, the tag version follows the app version (`v0.1.4-cp8`, `v0.1.4-cp9`). Background: until then `tauri.conf.json`, `package.json` and `Cargo.toml` all said 0.1.0 while the tags reached 0.1.3, so every MSI was "PRISM 0.1.0" and Windows would not upgrade in place (uninstall first). Bumped to **0.1.4** in all version files (list, rule and version scheme in `CLAUDE.md` "Releasing"): first to 0.2.0 (`fd3df41`), then, because the roadmap reserves 0.2 for near-duplicates, to 0.1.4 in a follow-up commit (`688e526`; history not rewritten). Scheme: 0.1.x = exact-duplicate releases (patch bump for every MSI that leaves the owner's PC), 0.2.0 = near-duplicate detection, 0.3.0 = the AI Pack; the earlier `v0.1.X-cpN` tags were checkpoint counters.
+5. **Parked, still to do before any outside release:** the clean-machine install test on a friend's PC and the VM test (section 12, item 6).
 
 **Owner's roadmap, in his chosen order**
 2. Pagination ✔ (in CP6)
@@ -528,7 +568,7 @@ From reading the code (not tested; treat as hypotheses):
 
 ## 12. Open verification items (do these first in a new session)
 
-**Status 2026-10-05 (see 6.5):** items 1 to 4 done and passed; item 5 done (built); item 6 blocked on this machine (Windows 11 Home: no Sandbox/Hyper-V). Still open: the owner's `tauri dev` check of the native dialog and the two locked-file screens, and item 6 on another PC or a VirtualBox VM. The list below is kept as written for reference; checks that mention 17 now have 20.
+**Status 2026-10-06 (see 6.5 and 6.8):** items 1 to 5 done and passed (the owner's `tauri dev` and installed-app checks have since passed too, through PRISM 0.1.4). Item 6 (clean-machine install) is **parked**: the test on a friend's PC and the VM test are still to do **before any outside release** (this machine is Windows 11 Home: no Sandbox/Hyper-V). The list below is kept as written for reference; checks that mention 17 now have 20.
 
 1. `git status`, `git branch --show-current` (expect `checkpoint-6-pagination`), `git log --oneline -8`. Confirm the instructed commits exist (paginate, delete-in-place `b6dc3c3`, smoke-test 17 checks, stay-on-results banner). The owner restarted his PC at the end of the chat, so nothing should be lost, but confirm.
 2. `git ls-files | Select-String tsbuildinfo` should print nothing and `.gitignore` should contain `*.tsbuildinfo` (CP5 housekeeping was instructed, not shown).
