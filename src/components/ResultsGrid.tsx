@@ -201,7 +201,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => handleToggleGroup(group.id)}
-                      className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-amber-600 dark:text-amber-500 cursor-pointer"
+                      className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-amber-600 dark:text-amber-500 accent-amber-600 cursor-pointer"
                       onClick={(e) => e.stopPropagation()}
                     />
                     <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
