@@ -84,7 +84,11 @@ npm run tauri build                                                             
   - `package.json` and the two root entries at the top of `package-lock.json`
   - `backend/app/main.py` (the FastAPI `version=` and the `/health` response)
 - Use plain `MAJOR.MINOR.PATCH` (MSI needs numeric parts; major and minor at most 255). Check with `git grep -n -F "<old version>"`: only third-party crates, pinned packages and history should remain.
-- **Tag names are checkpoint markers, not app versions.** `v0.1.X-cpN` counts checkpoints (`v0.1.3-cp7` shipped an app that said 0.1.0). The version the user sees is the one in the files above.
+- **Version scheme (owner's decision, 2026-10-05):**
+  - **0.1.x** = exact-duplicate releases. Bump the patch number (0.1.4, 0.1.5, ...) for **every MSI that leaves the owner's PC**.
+  - **0.2.0** = near-duplicate detection (perceptual hash). Reserved; do not use it for anything else.
+  - **0.3.0** = the AI Pack.
+- **Tags like `v0.1.3-cp7` are checkpoint markers, never app versions.** `v0.1.X-cpN` counts checkpoints (`v0.1.3-cp7` shipped an app that said 0.1.0). The version the user sees is the one in the files above.
 
 Generate a test folder (100 unique images plus 100 exact copies, so 200 files and 100 groups):
 
@@ -128,7 +132,7 @@ $mk = "import os, sys, shutil; from PIL import Image; d = sys.argv[1]; [(Image.f
 
 - `main` holds Checkpoint 6 (merge `2de3458`, tag **`v0.1.2-cp6`**: pagination, in-place delete, stay-on-results banner, summary strip + skipped-files notice) and Checkpoint 7 (merge `8faacf8`, tag **`v0.1.3-cp7`**: dark mode following Windows, contrast fixes, compact delete bar, amber buttons with dark text, amber checkboxes, backend error messages in the UI, unit tests in the build script). Merged 2026-10-05 after the owner's 11-step installed-app test passed.
 - **CP6 was never built on its own:** `checkpoint-7-dark-mode` was stacked on `checkpoint-6-pagination`, so one installer built from `e4151b2` tested both, and `v0.1.2-cp6` was verified inside the CP7 installer. `main`'s tree after the CP7 merge is identical to that build.
-- `main` and the two tags are pushed. Branch **`checkpoint-8-version-bump`** (from `main`; not built, merged, tagged or pushed) bumps the app version from 0.1.0 to **0.2.0** everywhere (see "Releasing"); `tsc`, the 7 unit tests and the 20-check smoke test pass, and `/health` reports 0.2.0. Next: build exe then MSI, and the owner tests an **upgrade in place** (0.2.0 MSI installed over the installed 0.1.0, no uninstall).
+- `main` and the two tags are pushed. Branch **`checkpoint-8-version-bump`** (from `main`; not built, merged, tagged or pushed) bumps the app version from 0.1.0 to **0.1.4** everywhere (see "Releasing"; it briefly said 0.2.0, changed in a follow-up commit so 0.2.0 stays reserved for near-duplicates); `tsc`, the 7 unit tests and the 20-check smoke test pass, and `/health` reports 0.1.4. Next: build exe then MSI, and the owner tests an **upgrade in place** (0.1.4 MSI installed over the installed 0.1.0, no uninstall).
 - Start each session with `git status` and `git log --oneline -10`.
 
 ## 9. Next tasks (in order; confirm the first with the owner)
