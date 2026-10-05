@@ -2,13 +2,21 @@
 
 import React, { useEffect, useState } from 'react';
 import { FolderSelector } from './components/FolderSelector';
-import { ResultsSummary } from './components/ResultsSummary';
+import { ResultsSummary, ReviewHint } from './components/ResultsSummary';
 import { ResultsGrid } from './components/ResultsGrid';
+import { InsightsPanel } from './components/InsightsPanel';
+import { ResultsTabs, panelId, tabId } from './components/ResultsTabs';
 import { api } from './services/api';
 import { ScanningView } from './components/ScanningView';
 import type { ScanSummary, ScanResults, ScanProgressResponse, DeleteResponse } from './types';
 
 type AppState = 'starting' | 'folder-select' | 'scanning' | 'results' | 'error';
+type ResultsTab = 'insights' | 'review';
+
+const RESULTS_TABS: { id: ResultsTab; label: string }[] = [
+  { id: 'insights', label: 'Insights' },
+  { id: 'review', label: 'Review duplicates' },
+];
 
 interface Notice {
   kind: 'success' | 'warning' | 'error';
@@ -28,6 +36,8 @@ function App() {
   const [scanProgress, setScanProgress] = useState<ScanProgressResponse | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [clearedByDeleting, setClearedByDeleting] = useState(false);
+  const [tab, setTab] = useState<ResultsTab>('insights');
+  const [insightsVersion, setInsightsVersion] = useState(0);
 
   // Wait for the bundled backend to come up before showing anything
   useEffect(() => {
@@ -63,6 +73,7 @@ function App() {
       // Fetch results
       const scanResults = await api.getScanResults(started.scan_id);
 
+      setTab('insights'); // a new scan opens on Insights
       setAppData({
         state: 'results',
         scanResponse: {
@@ -144,6 +155,7 @@ function App() {
       setNotice({ kind: 'error', title: `Could not delete: ${errorMessage}` });
     } finally {
       setIsDeleting(false);
+      setInsightsVersion((v) => v + 1); // insights are recomputed from what is left
     }
   };
   const handleReset = () => {
@@ -233,40 +245,63 @@ function App() {
             </div>
           )}
 
-          {/* One-line summary, what to do next, and any photos that could not be read */}
+          {/* One-line summary and any photos that could not be read (above the tabs: visible on both) */}
           <ResultsSummary
             folderPath={appData.scanResponse.folder_path}
             totalPhotos={appData.scanResponse.total_photos}
             groups={appData.scanResults.groups}
             skippedCount={appData.scanResponse.skipped_count}
             skipped={appData.scanResponse.skipped}
-            hasDeleted={clearedByDeleting}
           />
 
-          {/* Duplicate Groups */}
-          {appData.scanResults.groups.length > 0 ? (
-            <div className="mt-8">
+          <div className="max-w-4xl mx-auto mt-6">
+            <ResultsTabs tabs={RESULTS_TABS} active={tab} onChange={setTab} label="Scan results" />
+          </div>
+
+          {/* Both panels stay mounted (hidden when inactive) so the selection and page survive a tab switch */}
+          <div
+            id={panelId('insights')}
+            role="tabpanel"
+            aria-labelledby={tabId('insights')}
+            tabIndex={0}
+            hidden={tab !== 'insights'}
+            className="max-w-4xl mx-auto mt-4 bg-white dark:bg-slate-900 rounded-lg shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+          >
+            <InsightsPanel scanId={appData.scanResponse.scan_id} refreshKey={insightsVersion} />
+          </div>
+
+          <div
+            id={panelId('review')}
+            role="tabpanel"
+            aria-labelledby={tabId('review')}
+            tabIndex={0}
+            hidden={tab !== 'review'}
+            className="max-w-4xl mx-auto mt-4 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 rounded-lg"
+          >
+            <ReviewHint groupCount={appData.scanResults.groups.length} hasDeleted={clearedByDeleting} />
+            {appData.scanResults.groups.length > 0 ? (
               <ResultsGrid
                 groups={appData.scanResults.groups}
                 onSelectGroups={handleSelectGroups}
                 onDelete={handleDeleteDuplicates}
                 isDeleting={isDeleting}
               />
-            </div>
-          ) : (
-            <div className="mt-8 p-8 bg-white dark:bg-slate-900 rounded-lg shadow-lg text-center">
-              <p className="text-lg text-slate-600 dark:text-slate-400">
-                {clearedByDeleting
-                  ? 'All duplicates cleared. Nice and tidy!'
-                  : 'No duplicates found! Your photos are all unique.'}
-              </p>              <button
-                onClick={handleReset}
-                className="mt-4 px-6 py-2 bg-amber-500 text-amber-950 rounded-lg font-semibold hover:bg-amber-400"
-              >
-                Scan Another Folder
-              </button>
-            </div>
-          )}
+            ) : (
+              <div className="p-8 bg-white dark:bg-slate-900 rounded-lg shadow-lg text-center">
+                <p className="text-lg text-slate-600 dark:text-slate-400">
+                  {clearedByDeleting
+                    ? 'All duplicates cleared. Nice and tidy!'
+                    : 'No duplicates found! Your photos are all unique.'}
+                </p>
+                <button
+                  onClick={handleReset}
+                  className="mt-4 px-6 py-2 bg-amber-500 text-amber-950 rounded-lg font-semibold hover:bg-amber-400"
+                >
+                  Scan Another Folder
+                </button>
+              </div>
+            )}
+          </div>
 
         </div>
       </div>

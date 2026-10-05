@@ -9,6 +9,7 @@ import type {
   ScanResults,
   DeleteRequest,
   DeleteResponse,
+  InsightsResponse,
 } from '../types';
 
 /** The backend's own explanation ({"message": "..."}) if it sent one, else the HTTP status text. */
@@ -137,6 +138,25 @@ class ApiService {
   async deleteDuplicates(scanId: string, groupIds: string[]): Promise<DeleteResponse> {
     const request: DeleteRequest = { scan_id: scanId, group_ids: groupIds };
     return this.request('/scan/delete', 'POST', request);
+  }
+
+  async getInsights(scanId: string): Promise<InsightsResponse> {
+    return this.request(`/scan/insights?scan_id=${encodeURIComponent(scanId)}`, 'GET');
+  }
+
+  /**
+   * Opens a scanned folder in Explorer. Only ids go to the app: its Rust side looks the folder up in
+   * this scan through the backend and refuses anything else, so no path ever comes from this page.
+   */
+  async openScanFolder(scanId: string, folderId: string): Promise<void> {
+    if (!('__TAURI_INTERNALS__' in window)) {
+      throw new Error('Open folder works in the Prism app');
+    }
+    try {
+      await invoke('open_scan_folder', { scanId, folderId });
+    } catch (error) {
+      throw new Error(typeof error === 'string' ? error : error instanceof Error ? error.message : 'Could not open the folder');
+    }
   }
 
   async getStats(): Promise<any> {
