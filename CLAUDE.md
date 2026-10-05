@@ -76,6 +76,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-backend.ps1   
 npm run tauri build                                                              # MSI in src-tauri\target\release\bundle\msi\ (about 24.6 MiB)
 ```
 
+### Releasing
+
+- **Bump the app version before every MSI.** Windows only upgrades in place (installs over the old copy, no uninstall) when the new MSI has a **higher** version; with the same version it does not replace the old copy (that is why every earlier install needed an uninstall first). Change it in all of these, in the same commit, then build:
+  - `src-tauri/tauri.conf.json` (`version`: this is the MSI's version and file name, the one Windows compares)
+  - `src-tauri/Cargo.toml` (`[package] version`) and the `name = "prism"` entry in `src-tauri/Cargo.lock`
+  - `package.json` and the two root entries at the top of `package-lock.json`
+  - `backend/app/main.py` (the FastAPI `version=` and the `/health` response)
+- Use plain `MAJOR.MINOR.PATCH` (MSI needs numeric parts; major and minor at most 255). Check with `git grep -n -F "<old version>"`: only third-party crates, pinned packages and history should remain.
+- **Version scheme (owner's decision, 2026-10-05):**
+  - **0.1.x** = exact-duplicate releases. Bump the patch number (0.1.4, 0.1.5, ...) for **every MSI that leaves the owner's PC**.
+  - **0.2.0** = near-duplicate detection (perceptual hash). Reserved; do not use it for anything else.
+  - **0.3.0** = the AI Pack.
+- **Tags like `v0.1.3-cp7` are checkpoint markers, never app versions.** `v0.1.X-cpN` counts checkpoints (`v0.1.3-cp7` shipped an app that said 0.1.0). The version the user sees is the one in the files above.
+
 Generate a test folder (100 unique images plus 100 exact copies, so 200 files and 100 groups):
 
 ```powershell
@@ -111,17 +125,17 @@ $mk = "import os, sys, shutil; from PIL import Image; d = sys.argv[1]; [(Image.f
 - **Vite `EBUSY` crash** on `src-tauri\target\debug\deps\prism.exe`: set `VITE_CHOKIDAR_USEPOLLING` in the same terminal. A permanent fix (make Vite ignore `src-tauri`) is on the backlog.
 - **Vite can serve a stale module** when a file is saved twice in quick succession (its watcher missed the second save): the page then fails with errors like `errorMessage is not defined` even after a full reload. Check what is served (`fetch('/src/services/api.ts')` in the page) and restart the dev server.
 - Before building or testing the installed app, make sure no `prism`, `prism-backend`, `python` or `node` process from an earlier run is alive; confirm a process is yours with `Get-CimInstance Win32_Process -Filter "ProcessId=<id>"` before stopping it. Two `python.exe` rows for one venv backend, and two `prism-backend` rows for the installed app, are normal (launcher plus child).
-- The same MSI version does not upgrade in place: uninstall the old PRISM (Settings, Apps) before installing a new MSI. The MSI is unsigned, so SmartScreen warns (More info, Run anyway).
+- An MSI with the same version does not upgrade in place: bump the version before building (see "Releasing" in section 5); otherwise uninstall the old PRISM (Settings, Apps) first. Every MSI up to `v0.1.3-cp7` said 0.1.0. The MSI is unsigned, so SmartScreen warns (More info, Run anyway).
 - PyInstaller prints a deprecation warning when run as admin (v7 will refuse). Harmless build warnings: pip "Cache entry deserialization failed", `send2trash.mac` submodule, `tzdata` hidden import.
 
 ## 8. Current state (2026-10-05)
 
 - `main` holds Checkpoint 6 (merge `2de3458`, tag **`v0.1.2-cp6`**: pagination, in-place delete, stay-on-results banner, summary strip + skipped-files notice) and Checkpoint 7 (merge `8faacf8`, tag **`v0.1.3-cp7`**: dark mode following Windows, contrast fixes, compact delete bar, amber buttons with dark text, amber checkboxes, backend error messages in the UI, unit tests in the build script). Merged 2026-10-05 after the owner's 11-step installed-app test passed.
 - **CP6 was never built on its own:** `checkpoint-7-dark-mode` was stacked on `checkpoint-6-pagination`, so one installer built from `e4151b2` tested both, and `v0.1.2-cp6` was verified inside the CP7 installer. `main`'s tree after the CP7 merge is identical to that build.
-- The app version is still **0.1.0** in `tauri.conf.json`, `package.json` and `Cargo.toml`, although the tags say 0.1.3 (see next tasks).
+- `main` and the two tags are pushed. Branch **`checkpoint-8-version-bump`** (from `main`; not built, merged, tagged or pushed) bumps the app version from 0.1.0 to **0.1.4** everywhere (see "Releasing"; it briefly said 0.2.0, changed in a follow-up commit so 0.2.0 stays reserved for near-duplicates); `tsc`, the 7 unit tests and the 20-check smoke test pass, and `/health` reports 0.1.4. Next: build exe then MSI, and the owner tests an **upgrade in place** (0.1.4 MSI installed over the installed 0.1.0, no uninstall).
 - Start each session with `git status` and `git log --oneline -10`.
 
 ## 9. Next tasks (in order; confirm the first with the owner)
 
-1. Push `main` and the tags `v0.1.2-cp6` / `v0.1.3-cp7` (ask before each push). No PR is needed any more: CP6 and CP7 are merged locally.
-2. Backlog in the owner's chosen order: `/thumbnail` validation against SQLite (survive backend restarts) → perceptual-hash near-duplicates (v0.2, wait for user feedback first) → code signing. Plus: **bump the app version per release** (so a new MSI upgrades in place instead of needing an uninstall), Cancel Scan button, faster hashing on spinning/USB disks, make Vite ignore `src-tauri`, delete the dead files, CORS hardening, HEIC/RAW support. Details in `docs/PROJECT_HISTORY.md` section 11.
+1. Checkpoint 8 (version bump): with approval, build exe then MSI from `checkpoint-8-version-bump`; owner tests the upgrade in place; ask before merging (`--no-ff`, `Checkpoint 8: ...`), tagging and pushing.
+2. Backlog in the owner's chosen order: `/thumbnail` validation against SQLite (survive backend restarts) → perceptual-hash near-duplicates (v0.2, wait for user feedback first) → code signing. Plus: Cancel Scan button, faster hashing on spinning/USB disks, make Vite ignore `src-tauri`, delete the dead files, CORS hardening, HEIC/RAW support. Details in `docs/PROJECT_HISTORY.md` section 11.
