@@ -16,6 +16,7 @@ class ScanProgress:
     """Progress update for a scan operation"""
     files_processed: int
     total_files_found: int
+    phase: str = "hashing"  # "discovering" or "hashing"
 
 class FolderScanner:
     """Recursively scans folders for image files and computes MD5 hashes"""
@@ -40,8 +41,20 @@ class FolderScanner:
                         file_size = os.path.getsize(file_path)
                         if file_size >= self.MIN_FILE_SIZE:
                             image_files.append(file_path)
+                            if progress_callback and len(image_files) % 200 == 0:
+                                progress_callback(ScanProgress(
+                                    files_processed=0,
+                                    total_files_found=len(image_files),
+                                    phase="discovering"
+                                ))
             
             print(f"Found {len(image_files)} candidate image files")
+            if progress_callback:
+                progress_callback(ScanProgress(
+                    files_processed=0,
+                    total_files_found=len(image_files),
+                    phase="hashing"
+                ))
             
             # Process files in parallel
             photos = []
@@ -64,7 +77,6 @@ class FolderScanner:
             
             session.photos = photos
             session.total_photos = len(photos)
-            session.status = "completed"
             print(f"Scan complete: {len(photos)} valid images")
             return session
             
