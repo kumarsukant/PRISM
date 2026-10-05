@@ -141,18 +141,25 @@ function App() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-amber-50 to-slate-50 dark:from-slate-950 dark:to-slate-900 p-8">
         <div className="max-w-6xl mx-auto">
-          {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-4xl font-bold text-slate-900 dark:text-white mb-2">
-              📸 Prism
-            </h1>
-            <p className="text-slate-600 dark:text-slate-400">
-              See your photos clearly • Remove duplicates with confidence
-            </p>
+          {/* Header: sticky, so the way back is always visible */}
+          <div className="sticky top-0 z-10 -mx-4 mb-8 px-4 py-4 flex items-start justify-between gap-4 bg-amber-50/90 dark:bg-slate-950/90 backdrop-blur border-b border-amber-100 dark:border-slate-800">
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+                📸 Prism
+              </h1>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                See your photos clearly • Remove duplicates with confidence
+              </p>
+            </div>
+            <button
+              onClick={handleReset}
+              className="shrink-0 px-4 py-2 text-sm font-semibold text-amber-700 dark:text-amber-300 bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 rounded-lg hover:bg-amber-50 dark:hover:bg-slate-700"
+            >
+              &larr; Back to Folder Selection
+            </button>
           </div>
 
-          {/* Scan Results */}
-          <ScanProgress
+          {/* Scan Results */}          <ScanProgress
             scanId={appData.scanResponse.scan_id}
             totalPhotos={appData.scanResponse.total_photos}
             exactDuplicates={appData.scanResponse.exact_duplicates}
@@ -184,15 +191,6 @@ function App() {
             </div>
           )}
 
-          {/* Reset Button */}
-          <div className="mt-8 text-center">
-            <button
-              onClick={handleReset}
-              className="text-sm text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold"
-            >
-              ← Back to Folder Selection
-            </button>
-          </div>
         </div>
       </div>
     );
