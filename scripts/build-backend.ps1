@@ -21,11 +21,13 @@ if ($LASTEXITCODE -ne 0) { Fail 'pip install of requirements-release.txt failed'
 & $py -m pip install --quiet --disable-pip-version-check pyinstaller
 if ($LASTEXITCODE -ne 0) { Fail 'pip install pyinstaller failed (if it names Python 3.14, use the 3.13 fallback from the chat)' }
 
-# 2. import gate: the backend must import using ONLY the release packages
-Write-Host '== 2/5 import check ==' -ForegroundColor Cyan
+# 2. import gate: the backend must import using ONLY the release packages, and its unit tests must pass there
+Write-Host '== 2/5 import check + unit tests ==' -ForegroundColor Cyan
 $env:PRISM_DATA_DIR = Join-Path $env:TEMP 'prism_build_data'
 & $py -c "import sys; sys.path.insert(0, r'$be\app'); import main; print('import check OK')"
 if ($LASTEXITCODE -ne 0) { Fail 'backend does not import in the release venv: a package is missing from requirements-release.txt (see the error above)' }
+& $py -m unittest discover -s "$be\tests"
+if ($LASTEXITCODE -ne 0) { Fail 'unit tests failed in the release venv (see above); nothing was frozen' }
 
 # 3. freeze
 Write-Host '== 3/5 PyInstaller (this takes a few minutes) ==' -ForegroundColor Cyan
