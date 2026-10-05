@@ -6,6 +6,12 @@
       "runtimeExecutable": "C:\\Program Files\\nodejs\\npm.cmd",
       "runtimeArgs": ["--prefix", "C:\\Projects\\PRISM\\frontend", "run", "dev"],
       "port": 3000
+    },
+    {
+      "name": "desktop-ui",
+      "runtimeExecutable": "C:\\Program Files\\nodejs\\npm.cmd",
+      "runtimeArgs": ["--prefix", "C:\\Projects\\PRISM", "run", "dev"],
+      "port": 5173
     }
   ]
 }

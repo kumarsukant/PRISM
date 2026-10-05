@@ -2,14 +2,19 @@
 
 import React, { useEffect, useState } from 'react';
 import { FolderSelector } from './components/FolderSelector';
-import { ScanProgress } from './components/ScanProgress';
+import { ResultsSummary } from './components/ResultsSummary';
 import { ResultsGrid } from './components/ResultsGrid';
 import { api } from './services/api';
 import { ScanningView } from './components/ScanningView';
-import type { ScanSummary, ScanResults, ScanProgressResponse } from './types';
+import type { ScanSummary, ScanResults, ScanProgressResponse, DeleteResponse } from './types';
 
 type AppState = 'starting' | 'folder-select' | 'scanning' | 'results' | 'error';
 
+interface Notice {
+  kind: 'success' | 'warning' | 'error';
+  title: string;
+  details?: string[];
+}
 interface AppData {
   state: AppState;
   error?: string;
@@ -21,6 +26,8 @@ function App() {
   const [appData, setAppData] = useState<AppData>({ state: 'starting' });
   const [isDeleting, setIsDeleting] = useState(false);
   const [scanProgress, setScanProgress] = useState<ScanProgressResponse | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [clearedByDeleting, setClearedByDeleting] = useState(false);
 
   // Wait for the bundled backend to come up before showing anything
   useEffect(() => {
@@ -45,6 +52,8 @@ function App() {
   const handleFolderSelect = async (folderPath: string) => {
     try {
       setScanProgress(null);
+      setNotice(null);
+      setClearedByDeleting(false);
       setAppData({ state: 'scanning' });
 
       // Start the scan (returns immediately), then follow its progress
@@ -59,10 +68,13 @@ function App() {
         scanResponse: {
           status: 'completed',
           scan_id: started.scan_id,
+          folder_path: folderPath,
           total_photos: finished.total_photos,
           exact_duplicates: finished.exact_duplicates,
           visual_duplicates: finished.visual_duplicates,
           duplicate_groups: finished.duplicate_groups,
+          skipped_count: finished.skipped_count ?? 0,
+          skipped: finished.skipped ?? [],
           message: `Scan complete: ${finished.total_photos} photos, ${finished.duplicate_groups} groups found`,
         },
         scanResults,
@@ -83,27 +95,57 @@ function App() {
 
   const handleDeleteDuplicates = async (groupIds: string[]) => {
     if (!appData.scanResponse) return;
+    const scanId = appData.scanResponse.scan_id;
 
     try {
       setIsDeleting(true);
-      await api.deleteDuplicates(appData.scanResponse.scan_id, groupIds);
+      setNotice(null);
+      const result: DeleteResponse = await api.deleteDuplicates(scanId, groupIds);
 
-      // Reset to folder select after deletion
-      setTimeout(() => {
-        setAppData({ state: 'folder-select' });
-        setIsDeleting(false);
-      }, 1000);
+      // Reload what is left, so the screen always matches the backend (including any group
+      // that still holds a file that could not be moved)
+      const scanResults = await api.getScanResults(scanId);
+
+      setAppData((previous) => ({
+        ...previous,
+        scanResults,
+        scanResponse: previous.scanResponse
+          ? {
+              ...previous.scanResponse,
+              total_photos: result.total_photos,
+              exact_duplicates: result.exact_duplicates,
+              visual_duplicates: result.visual_duplicates,
+              duplicate_groups: result.duplicate_groups,
+            }
+          : previous.scanResponse,
+      }));
+      setClearedByDeleting(true);
+
+      const freed = result.storage_freed_mb.toFixed(1);
+      if (result.failed_count > 0) {
+        setNotice({
+          kind: 'warning',
+          title: `Deleted ${result.files_deleted} file${result.files_deleted !== 1 ? 's' : ''} (${freed} MB freed), but ${result.failed_count} could not be moved to the Recycle Bin.`,
+          details: [
+            ...result.failed.slice(0, 5).map((f) => `${f.file}: ${f.reason}`),
+            ...(result.failed_count > 5 ? [`...and ${result.failed_count - 5} more`] : []),
+            'Those groups are still listed so you can try again.',
+          ],
+        });
+      } else {
+        setNotice({
+          kind: 'success',
+          title: `Deleted ${result.files_deleted} file${result.files_deleted !== 1 ? 's' : ''}, freed ${freed} MB. Moved to the Recycle Bin, so you can restore them.`,
+        });
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Deletion failed';
       console.error('Delete error:', error);
-      setAppData({
-        state: 'error',
-        error: errorMessage,
-      });
+      setNotice({ kind: 'error', title: `Could not delete: ${errorMessage}` });
+    } finally {
       setIsDeleting(false);
     }
   };
-
   const handleReset = () => {
     setAppData({ state: 'folder-select' });
   };
@@ -159,12 +201,46 @@ function App() {
             </button>
           </div>
 
-          {/* Scan Results */}          <ScanProgress
-            scanId={appData.scanResponse.scan_id}
+          {/* Result of the last delete */}
+          {notice && (
+            <div
+              className={`max-w-4xl mx-auto mb-6 p-4 rounded-lg border flex items-start justify-between gap-4 ${
+                notice.kind === 'success'
+                  ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 text-green-900 dark:text-green-200'
+                  : notice.kind === 'warning'
+                  ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200'
+                  : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-900 dark:text-red-200'
+              }`}
+              role="status"
+            >
+              <div className="text-sm">
+                <p className="font-semibold">{notice.title}</p>
+                {notice.details && (
+                  <ul className="mt-2 space-y-1 list-disc list-inside font-mono text-xs">
+                    {notice.details.map((line, index) => (
+                      <li key={index}>{line}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <button
+                onClick={() => setNotice(null)}
+                className="shrink-0 text-sm font-semibold opacity-70 hover:opacity-100"
+                aria-label="Dismiss message"
+              >
+                &times;
+              </button>
+            </div>
+          )}
+
+          {/* One-line summary, what to do next, and any photos that could not be read */}
+          <ResultsSummary
+            folderPath={appData.scanResponse.folder_path}
             totalPhotos={appData.scanResponse.total_photos}
-            exactDuplicates={appData.scanResponse.exact_duplicates}
-            visualDuplicates={appData.scanResponse.visual_duplicates}
-            duplicateGroups={appData.scanResponse.duplicate_groups}
+            groups={appData.scanResults.groups}
+            skippedCount={appData.scanResponse.skipped_count}
+            skipped={appData.scanResponse.skipped}
+            hasDeleted={clearedByDeleting}
           />
 
           {/* Duplicate Groups */}
@@ -180,9 +256,10 @@ function App() {
           ) : (
             <div className="mt-8 p-8 bg-white dark:bg-slate-900 rounded-lg shadow-lg text-center">
               <p className="text-lg text-slate-600 dark:text-slate-400">
-                No duplicates found! Your photos are all unique.
-              </p>
-              <button
+                {clearedByDeleting
+                  ? 'All duplicates cleared. Nice and tidy!'
+                  : 'No duplicates found! Your photos are all unique.'}
+              </p>              <button
                 onClick={handleReset}
                 className="mt-4 px-6 py-2 bg-amber-600 dark:bg-amber-700 text-white rounded-lg font-semibold hover:bg-amber-700 dark:hover:bg-amber-800"
               >

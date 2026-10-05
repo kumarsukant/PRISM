@@ -48,13 +48,23 @@ export interface ScanStartResponse {
   scan_id: string;
 }
 
+/** A photo the scanner could not read (locked, access denied, vanished). Never silently dropped. */
+export interface SkippedFile {
+  file: string;
+  path: string;
+  reason: string;
+}
+
 export interface ScanSummary {
   status: string;
   scan_id: string;
+  folder_path: string;
   total_photos: number;
   exact_duplicates: number;
   visual_duplicates: number;
   duplicate_groups: number;
+  skipped_count: number;
+  skipped: SkippedFile[];
   message: string;
 }
 
@@ -68,6 +78,8 @@ export interface ScanProgressResponse {
   exact_duplicates: number;
   visual_duplicates: number;
   duplicate_groups: number;
+  skipped_count: number;
+  skipped: SkippedFile[]; // first 20 only; skipped_count has the total
   error_message: string | null;
 }
 export interface DeleteRequest {
@@ -75,10 +87,22 @@ export interface DeleteRequest {
   group_ids: string[];
 }
 
+export interface DeleteFailure {
+  file: string;
+  reason: string;
+}
+
 export interface DeleteResponse {
-  status: string;
+  status: 'success' | 'partial' | string;
   scan_id: string;
   files_deleted: number;
   storage_freed_mb: number;
+  groups_resolved: number;
+  failed: DeleteFailure[];
+  failed_count: number;
+  total_photos: number;
+  exact_duplicates: number;
+  visual_duplicates: number;
+  duplicate_groups: number;
   message: string;
 }

@@ -164,6 +164,8 @@ async def get_progress(scan_id: str):
         "exact_duplicates": session.exact_duplicates,
         "visual_duplicates": session.visual_duplicates,
         "duplicate_groups": len(session.duplicate_groups),
+        "skipped_count": len(session.skipped_files),
+        "skipped": session.skipped_files[:20],
         "error_message": session.error_message
     }
 
@@ -216,9 +218,13 @@ async def get_results(scan_id: str):
     }
 
 @app.post("/scan/delete")
-async def delete_duplicates(request_data: dict):
-    """Delete selected duplicate groups"""
-    scan_id = request_data.get("scan_id", "").strip()
+def delete_duplicates(request_data: dict):
+    """Move the duplicates of the selected groups to the Recycle Bin.
+
+    This is a plain def on purpose: FastAPI runs it in a worker thread, so deleting many files
+    cannot block the server (or /health) while it works.
+    """
+    scan_id = str(request_data.get("scan_id", "")).strip()
     group_ids = request_data.get("group_ids", [])
 
     if not scan_id:
@@ -227,27 +233,47 @@ async def delete_duplicates(request_data: dict):
             content={"status": "error", "message": "scan_id is required"}
         )
 
-    if scan_id not in scan_results:
+    session = scan_results.get(scan_id)
+    if session is None:
         return JSONResponse(
             status_code=404,
             content={"status": "error", "message": "Scan not found"}
         )
-    
+
+    if session.status != "completed":
+        return JSONResponse(
+            status_code=409,
+            content={"status": "error", "message": "Scan is not complete yet"}
+        )
+
     try:
-        session = scan_results[scan_id]
-        groups_to_delete = [g for g in session.duplicate_groups if g.id in group_ids]
-        
+        wanted = set(group_ids)
+        groups_to_delete = [g for g in session.duplicate_groups if g.id in wanted]
+
         print(f"Deleting {len(groups_to_delete)} duplicate groups...")
-        session = deleter.delete_duplicates(session, groups_to_delete)
-        
+        result = deleter.delete_duplicates(session, groups_to_delete)
+
+        failed = result["failed"]
+        freed_mb = result["freed_bytes"] / (1024 * 1024)
+        message = f"Deleted {result['files_deleted']} files, freed {freed_mb:.1f} MB"
+        if failed:
+            message += f"; {len(failed)} could not be moved to the Recycle Bin"
+
         return {
-            "status": "success",
+            "status": "partial" if failed else "success",
             "scan_id": scan_id,
-            "files_deleted": session.files_deleted,
-            "storage_freed_mb": round(session.storage_freed_mb, 2),
-            "message": f"Deleted {session.files_deleted} files, freed {session.storage_freed_mb:.1f} MB"
+            "files_deleted": result["files_deleted"],
+            "storage_freed_mb": round(freed_mb, 2),
+            "groups_resolved": len(result["resolved_group_ids"]),
+            "failed": failed[:20],
+            "failed_count": len(failed),
+            "total_photos": session.total_photos,
+            "exact_duplicates": session.exact_duplicates,
+            "visual_duplicates": session.visual_duplicates,
+            "duplicate_groups": len(session.duplicate_groups),
+            "message": message
         }
-        
+
     except Exception as e:
         print(f"Delete error: {e}")
         return JSONResponse(
