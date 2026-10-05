@@ -34,21 +34,22 @@ C:\projects\PRISM
   backend\app\main.py              FastAPI app, scan worker thread, all routes, __main__ (argparse --port --parent-pid)
   backend\app\config.py            Config (data dir from PRISM_DATA_DIR, dev fallback ~/.prism)
   backend\app\models\scan.py       dataclasses: PhotoRecord, DuplicateGroup, ScanSession
-  backend\app\services\services.py FolderScanner (records skipped_files), ScanProgress, Deduper (MD5), SafeDeleter, describe_file_error
-  backend\tests\test_skipped_files.py  unittest (stdlib): skipped-file reasons, progress cap, delete failure reason
+  backend\app\services\services.py FolderScanner (os.scandir walk; records skipped_files and coverage; never opens online-only files), ScanProgress, Deduper (MD5), SafeDeleter, describe_file_error, file_attributes / is_online_only
+  backend\app\services\insights.py build_insights (GET /scan/insights), find_folder (GET /scan/folder), coverage_summary; definitions in its docstring
+  backend\tests\                   unittest (stdlib): test_skipped_files, test_scan_types (.tif), test_insights (definitions, tips, online-only, 25k timing), test_request_guards (CORS/Origin/Host)
   backend\app\services\deduper.py, services\main.py   DEAD files (old CLIP code / old server copy), safe to delete
   backend\requirements-release.txt pinned runtime deps for the frozen backend (source of truth for releases)
   backend\requirements.txt         STALE, do not trust
   backend\venv                     dev venv (has torch etc., Python 3.14.5)
   backend\venv-release             release venv (git-ignored, created by the build script)
   src\App.tsx                      state machine: starting / folder-select / scanning / results / error
-  src\components\                  FolderSelector, ScanningView (live progress), ResultsSummary (one-line strip, status line, skipped-files notice; replaced ScanProgress.tsx), ResultsGrid
-  src\services\api.ts              ApiService: dynamic base URL, waitForBackend, polling, thumbnailUrl
+  src\components\                  FolderSelector, ScanningView (live progress), ResultsSummary (one-line strip + skipped-files notice, above the tabs; ReviewHint), ResultsTabs (accessible tabs), InsightsPanel (Insights tab; all insight wording), ResultsGrid
+  src\services\api.ts              ApiService: dynamic base URL, waitForBackend, polling, thumbnailUrl, getInsights, openScanFolder
   src\types.ts
-  src-tauri\src\lib.rs             spawns and kills the sidecar, backend_port command
+  src-tauri\src\lib.rs             spawns and kills the sidecar; commands backend_port, open_scan_folder (loopback lookup + opener plugin); Rust unit tests
   src-tauri\tauri.conf.json, Cargo.toml, capabilities\default.json
   src-tauri\binaries\              built sidecar exe (git-ignored)
-  scripts\build-backend.ps1, smoke-test.ps1, scan-responsiveness.ps1
+  scripts\build-backend.ps1, smoke-test.ps1, scan-responsiveness.ps1, make-insights-tree.ps1 (nested test tree with known counts, default C:\prism_insights)
   docs\PROJECT_HISTORY.md          full history and reference
   .claude\launch.json              Claude browser-pane dev servers: "frontend" (landing page, :3000), "desktop-ui" (this app's Vite, :5173); machine-specific paths
 ```
@@ -67,8 +68,10 @@ npm run tauri dev
 
 # Checks
 npx tsc --noEmit
-backend\venv\Scripts\python.exe -m unittest discover -s backend\tests -v               # no backend needed, 7 tests
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-test.ps1            # needs a backend on :8000, 20 checks
+backend\venv\Scripts\python.exe -m unittest discover -s backend\tests -v               # no backend needed, 40 tests
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-test.ps1            # needs a backend on :8000, 34 checks
+cd src-tauri; cargo test --lib; cd ..                                                 # 9 Rust tests (Open folder reply parsing, timeouts)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\make-insights-tree.ps1    # C:\prism_insights: 57 photos, 24 groups, known insights
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\scan-responsiveness.ps1 -Folder <folder>   # scan only, never deletes
 
 # Release (ORDER MATTERS: backend first, then the MSI)
@@ -111,6 +114,10 @@ $mk = "import os, sys, shutil; from PIL import Image; d = sys.argv[1]; [(Image.f
 - Errors shown to users come from the backend's JSON `message` field when present, else `HTTP <status>: <statusText>` (`errorMessage` in `api.ts`); no response at all shows "Prism's background service isn't responding...". Backend error responses should keep returning `{"status": "error", "message": "..."}`.
 - Release backend dependencies are **pinned** in `requirements-release.txt`. Anything the backend imports must be in it (the build script has an import gate that catches omissions; the same stage runs `backend/tests` with the release venv, before PyInstaller).
 - Backend binds `127.0.0.1` only. In release the port is random and passed by Tauri; the frontend asks Rust via the `backend_port` command. Never hard-code `8000` outside the dev default in `api.ts`.
+- **Online-only (cloud placeholder) files are never opened**: recognised from Windows attributes alone (`FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS` 0x400000, `RECALL_ON_OPEN` 0x40000, `OFFLINE` 0x1000; from the folder listing, and again by `GetFileAttributesW` before hashing and before a thumbnail), counted as `online_only`, never hashed, measured or thumbnailed. Opening one would make OneDrive download it.
+- **Insights are read-only.** The only action is Open folder (opens Explorer, changes nothing). No reorganize button, wizard, file-moving endpoint or reorganize tip without the owner's go-ahead (the Reorganizer is a separate, not-started backlog item). Insight wording lives in `InsightsPanel.tsx`; the backend sends ids and numbers; every statement about a cause is hedged with "often" and only describes what the counts show.
+- **Open folder** goes through Rust only: the page sends a scan id and a folder id; `open_scan_folder` looks the path up via the backend's `/scan/folder` (loopback, 2-second timeouts), requires an existing directory, and opens it with the opener plugin from Rust. `capabilities/default.json` grants the page **no** `opener:*` permission; keep it that way.
+- **The backend only talks to the app**: CORS allows `http(s)://tauri.localhost`, `tauri://localhost` and `localhost` / `127.0.0.1` with any port; a request with any other `Origin` is refused (403, logged once per origin); a `Host` other than `127.0.0.1` / `localhost` gets 400. `tauri dev` uses `http://localhost:5173` and **never exercises the release origin (`http://tauri.localhost`)**: test the installed MSI before a build is shared.
 - Tauri v2 quirks: the dialog plugin needs `tauri_plugin_dialog::init()` in `lib.rs`, `dialog:allow-open` in `capabilities/default.json`, and an EMPTY `plugins` block in `tauri.conf.json`. `fs:*` and `http:*` permissions do not exist in v2. `capabilities` is not valid inside `app.windows[]`. `[lib] name = "app_lib"` stays because `main.rs` calls `app_lib::run()`.
 
 ## 7. Windows and PowerShell traps (learned the hard way)
@@ -122,7 +129,7 @@ $mk = "import os, sys, shutil; from PIL import Image; d = sys.argv[1]; [(Image.f
 - No `grep`/`head`: use `Select-String` and `Select-Object -First N`.
 - Do not set `$ErrorActionPreference = 'Stop'` around pip, PyInstaller or cargo: their stderr output aborts the script. Check `$LASTEXITCODE` instead.
 - **Elevated builds poison the MSI folder.** A `.msi` created from an Administrator terminal carries a High Mandatory Level label; a later non-elevated build then fails with `Access is denied (os error 5)`. Fix: delete `src-tauri\target\release\bundle\msi\*` and `...\release\wix` from an elevated terminal, rebuild from a normal one.
-- **Vite `EBUSY` crash** on `src-tauri\target\debug\deps\prism.exe`: set `VITE_CHOKIDAR_USEPOLLING` in the same terminal. A permanent fix (make Vite ignore `src-tauri`) is on the backlog.
+- **Vite `EBUSY` crash** on `src-tauri\target\debug\deps\prism.exe`: set `VITE_CHOKIDAR_USEPOLLING` in the same terminal. A permanent fix (make Vite ignore `src-tauri`) is on the backlog. It also kills the browser-pane dev server (`desktop-ui`, no polling) whenever `cargo check` / `cargo test` writes to `src-tauri\target` while it runs (seen in Checkpoint 9): restart it afterwards.
 - **Vite can serve a stale module** when a file is saved twice in quick succession (its watcher missed the second save): the page then fails with errors like `errorMessage is not defined` even after a full reload. Check what is served (`fetch('/src/services/api.ts')` in the page) and restart the dev server.
 - Before building or testing the installed app, make sure no `prism`, `prism-backend`, `python` or `node` process from an earlier run is alive; confirm a process is yours with `Get-CimInstance Win32_Process -Filter "ProcessId=<id>"` before stopping it. Two `python.exe` rows for one venv backend, and two `prism-backend` rows for the installed app, are normal (launcher plus child).
 - An MSI with the same version does not upgrade in place: bump the version before building (see "Releasing" in section 5); otherwise uninstall the old PRISM (Settings, Apps) first. Every MSI up to `v0.1.3-cp7` said 0.1.0. The MSI is unsigned, so SmartScreen warns (More info, Run anyway).
@@ -132,10 +139,15 @@ $mk = "import os, sys, shutil; from PIL import Image; d = sys.argv[1]; [(Image.f
 
 - `main` holds Checkpoint 6 (merge `2de3458`, tag **`v0.1.2-cp6`**: pagination, in-place delete, stay-on-results banner, summary strip + skipped-files notice) and Checkpoint 7 (merge `8faacf8`, tag **`v0.1.3-cp7`**: dark mode following Windows, contrast fixes, compact delete bar, amber buttons with dark text, amber checkboxes, backend error messages in the UI, unit tests in the build script). Merged 2026-10-05 after the owner's 11-step installed-app test passed.
 - **CP6 was never built on its own:** `checkpoint-7-dark-mode` was stacked on `checkpoint-6-pagination`, so one installer built from `e4151b2` tested both, and `v0.1.2-cp6` was verified inside the CP7 installer. `main`'s tree after the CP7 merge is identical to that build.
-- `main` and the two tags are pushed. Branch **`checkpoint-8-version-bump`** (from `main`; not built, merged, tagged or pushed) bumps the app version from 0.1.0 to **0.1.4** everywhere (see "Releasing"; it briefly said 0.2.0, changed in a follow-up commit so 0.2.0 stays reserved for near-duplicates); `tsc`, the 7 unit tests and the 20-check smoke test pass, and `/health` reports 0.1.4. Next: build exe then MSI, and the owner tests an **upgrade in place** (0.1.4 MSI installed over the installed 0.1.0, no uninstall).
+- `main` and both tags are pushed. `main` is untouched since then.
+- Branch **`release-candidate`** (from `main`; not built, tagged or pushed) merges, with `--no-ff`, in this order:
+  - **`checkpoint-8-version-bump`**: app version 0.1.0 → **0.1.4** everywhere (see "Releasing"; it briefly said 0.2.0, changed in a follow-up commit so 0.2.0 stays reserved for near-duplicates), plus the "Releasing" section with the version scheme (0.1.x exact duplicates, 0.2.0 near-duplicates, 0.3.0 AI Pack). `/health` reports 0.1.4. Still to do: the owner's **upgrade-in-place** test (0.1.4 MSI installed over the installed 0.1.0, no uninstall).
+  - **`checkpoint-9-insights`**: Insights tab (default after a scan) next to Review duplicates; `/scan/insights` and `/scan/folder`; coverage counters (HEIC, RAW, under 10 KB, online-only, unreadable); online-only files never opened; `.tif` scanned; Open folder through Rust; backend restricted to the app's origins and loopback Host names. Verified: 40 unit tests, 9 Rust tests, 34-check smoke test, `tsc`, browser-pane run at 800x600 in both themes (contrast, tab keyboard, thumbnails under the new CORS), and the **owner's `tauri dev` check** (2026-10-05) **passed: Insights numbers against an independent answer key, tabs, Open folder (including the error when a folder is missing), backend log clean; not yet checked: light mode and live theme switching, delete then Insights, locked-file notice on both tabs, long path.** **Not verified yet: the installed MSI; the release origin `http://tauri.localhost` is only exercised there.**
+  - The two branches both edited sections 8 and 9 of this file; the merge conflict was resolved by keeping both.
 - Start each session with `git status` and `git log --oneline -10`.
 
 ## 9. Next tasks (in order; confirm the first with the owner)
 
-1. Checkpoint 8 (version bump): with approval, build exe then MSI from `checkpoint-8-version-bump`; owner tests the upgrade in place; ask before merging (`--no-ff`, `Checkpoint 8: ...`), tagging and pushing.
-2. Backlog in the owner's chosen order: `/thumbnail` validation against SQLite (survive backend restarts) → perceptual-hash near-duplicates (v0.2, wait for user feedback first) → code signing. Plus: Cancel Scan button, faster hashing on spinning/USB disks, make Vite ignore `src-tauri`, delete the dead files, CORS hardening, HEIC/RAW support. Details in `docs/PROJECT_HISTORY.md` section 11.
+1. With approval, build the backend exe, then the MSI, from `release-candidate` (version 0.1.4). The owner installs it **over** the installed 0.1.0 without uninstalling (the CP8 upgrade-in-place test) and checks Checkpoint 9 in the installed app (Open folder, the release origin, both themes). Then, with approval: merge `release-candidate` to `main` (`--no-ff`), tag, push.
+2. Backlog in the owner's chosen order: `/thumbnail` validation against SQLite (survive backend restarts) → perceptual-hash near-duplicates (v0.2, wait for user feedback first) → code signing. Plus: Cancel Scan button, faster hashing on spinning/USB disks, make Vite ignore `src-tauri`, delete the dead files (including `backend/app/main_old.py`), HEIC/RAW support, a frontend test runner (Vitest + Testing Library; ask first, it adds dev dependencies). Details in `docs/PROJECT_HISTORY.md` section 11.
+3. Later, **not started** (do not build any part of it without the owner's go-ahead): **Reorganizer**: after the user confirms, help move files into a simpler structure. Needs, before any code: a defined meaning of "simpler" (by date? by event? merging similar folders?); a preview of every move before it happens; a saved undo log and one-click Undo; no overwriting of files with the same name; care with OneDrive-synced folders and moves across drives; a warning for photo-catalog apps such as Lightroom, which track files by location; tests on generated folder trees including a failure halfway through. Held back because, unlike deleting, moving has no Recycle Bin, so a bug could scramble a user's organized library. Revisit once real users ask for it.

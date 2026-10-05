@@ -26,7 +26,6 @@ from models.scan import DuplicateGroup, PhotoRecord, ScanSession  # noqa: E402
 from services.services import FolderScanner, SafeDeleter  # noqa: E402
 
 _real_open = builtins.open
-_real_getsize = os.path.getsize
 
 
 def _make_png(path: str) -> None:
@@ -73,11 +72,13 @@ class SkippedFilesTest(unittest.TestCase):
         self.assertEqual([s["reason"] for s in session.skipped_files], ["Windows denied access"])
 
     def test_file_vanishing_during_discovery(self):
-        def fake_getsize(path):
-            if os.path.normcase(path) == os.path.normcase(self.unreadable):
-                raise FileNotFoundError(2, "No such file", path)
-            return _real_getsize(path)
-        with mock.patch.object(services.os.path, "getsize", fake_getsize):
+        real_entry_info = services._entry_info
+
+        def fake_entry_info(entry):
+            if os.path.normcase(entry.path) == os.path.normcase(self.unreadable):
+                raise FileNotFoundError(2, "No such file", entry.path)
+            return real_entry_info(entry)
+        with mock.patch.object(services, "_entry_info", fake_entry_info):
             session = self._scan()
         self.assertEqual(session.total_photos, 2)
         self.assertEqual([s["reason"] for s in session.skipped_files], ["no longer there (moved or deleted)"])

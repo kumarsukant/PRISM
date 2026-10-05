@@ -36,14 +36,17 @@ _setup_std_streams()
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 import os
+import re
 from typing import Optional, List
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import Config
 from models.scan import ScanSession, PhotoRecord, DuplicateGroup
-from services.services import FolderScanner, ScanProgress, Deduper, SafeDeleter
+from services.services import FolderScanner, ScanProgress, Deduper, SafeDeleter, file_attributes, is_online_only
+from services.insights import build_insights, coverage_summary, find_folder
 
 app = FastAPI(
     title="PRISM Backend",
@@ -51,13 +54,41 @@ app = FastAPI(
     description="AI-powered photo deduplication backend"
 )
 
+# Who may call the backend from a web page: the installed app (Tauri serves it from http://tauri.localhost on
+# Windows; https:// and tauri://localhost are the other forms Tauri uses) and the dev server (localhost or
+# 127.0.0.1, any port). NOTE: `tauri dev` loads http://localhost:5173, so it never exercises the tauri.localhost
+# origin; only the installed MSI does. Test the installed app before sharing a build.
+ALLOWED_ORIGIN = re.compile(r"^(https?://tauri\.localhost|tauri://localhost|https?://(localhost|127\.0\.0\.1)(:\d{1,5})?)$")
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origin_regex=ALLOWED_ORIGIN.pattern,
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
 )
+
+
+_refused_origins: set = set()
+
+
+@app.middleware("http")
+async def refuse_foreign_origins(request, call_next):
+    """A request from any other web page is refused outright (CORS alone would only hide the answer).
+    Requests without an Origin (thumbnails in <img>, the app's Rust side, scripts) are not affected."""
+    origin = request.headers.get("origin")
+    if origin is not None and not ALLOWED_ORIGIN.match(origin):
+        if origin not in _refused_origins:  # log each origin once, so a hostile page cannot flood the log
+            _refused_origins.add(origin)
+            print(f"Refused request from origin {origin!r}: {request.method} {request.url.path}")
+        return JSONResponse(status_code=403, content={"status": "error", "message": "Origin not allowed"})
+    return await call_next(request)
+
+
+# Outermost: only Host 127.0.0.1 or localhost (any port), against DNS-rebinding pages that reach the port
+# under their own domain name. Other hosts get 400 "Invalid host header".
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
 
 config = Config()
 scanner = FolderScanner(config)
@@ -166,8 +197,42 @@ async def get_progress(scan_id: str):
         "duplicate_groups": len(session.duplicate_groups),
         "skipped_count": len(session.skipped_files),
         "skipped": session.skipped_files[:20],
+        "coverage": coverage_summary(session),
         "error_message": session.error_message
     }
+
+
+def _completed_session(scan_id: str):
+    """(session, None) for a finished scan, or (None, error response)."""
+    session = scan_results.get(scan_id)
+    if session is None:
+        return None, JSONResponse(status_code=404, content={"status": "error", "message": "Scan not found"})
+    if session.status != "completed":
+        return None, JSONResponse(status_code=409, content={"status": "error", "message": "Scan is not complete yet"})
+    return session, None
+
+
+@app.get("/scan/insights")
+def get_insights(scan_id: str):
+    """Where the duplicates are: folders, folder pairs, tips and coverage. Read-only, computed on
+    demand from the session, so it reflects deletes. Plain def: it runs in a worker thread."""
+    session, error = _completed_session(scan_id)
+    if error:
+        return error
+    return build_insights(session)
+
+
+@app.get("/scan/folder")
+def get_folder(scan_id: str, folder_id: str):
+    """The absolute path of a folder holding photos in this scan, for the app's Open folder command.
+    Unknown ids get 404, so only folders that are part of the scan can be opened."""
+    session, error = _completed_session(scan_id)
+    if error:
+        return error
+    path = find_folder(session, folder_id)
+    if path is None:
+        return JSONResponse(status_code=404, content={"status": "error", "message": "Folder is not part of this scan"})
+    return {"status": "ok", "path": path}
 
 @app.get("/scan/results")
 async def get_results(scan_id: str):
@@ -315,6 +380,12 @@ async def get_thumbnail(path: str):
     cached = cache_dir / f"{key}.jpg"
 
     if not cached.exists():
+        # Never open an online-only file: that would download it from the cloud
+        if is_online_only(file_attributes(path)):
+            return JSONResponse(
+                status_code=409,
+                content={"status": "error", "message": "This file is online-only; Prism does not download it"}
+            )
         try:
             with Image.open(path) as img:
                 img.draft("RGB", (600, 600))

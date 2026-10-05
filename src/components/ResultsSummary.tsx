@@ -1,6 +1,7 @@
 // src/components/ResultsSummary.tsx
-// Compact summary above the duplicate groups: one line of counts, a short "what now" line, and a
-// notice for photos the scanner could not read. Replaces the old tall "Scan Complete" card.
+// Compact summary above the results tabs: one line of counts and a notice for photos the scanner could
+// not read (shown above the tabs, so it is visible on both). Replaces the old tall "Scan Complete" card.
+// The short "what now" line lives in the Review duplicates tab (ReviewHint).
 
 import React, { useMemo } from 'react';
 import { AlertCircle } from 'lucide-react';
@@ -12,8 +13,17 @@ interface ResultsSummaryProps {
   groups: DuplicateGroup[];
   skippedCount: number;
   skipped: SkippedFile[];
-  hasDeleted: boolean;
 }
+
+/** What to do on the Review duplicates tab; after a delete, how many groups are left. */
+export const ReviewHint: React.FC<{ groupCount: number; hasDeleted: boolean }> = ({ groupCount, hasDeleted }) =>
+  groupCount > 0 ? (
+    <p className="mb-4 px-1 text-sm text-slate-600 dark:text-slate-400">
+      {hasDeleted
+        ? `${count(groupCount, 'group', 'groups')} left to review.`
+        : 'Prism keeps one photo from each group (marked KEPT) and moves the extra copies to the Recycle Bin. Select the groups you want to clean up.'}
+    </p>
+  ) : null;
 
 const count = (n: number, one: string, many: string) => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
@@ -28,7 +38,6 @@ export const ResultsSummary: React.FC<ResultsSummaryProps> = ({
   groups,
   skippedCount,
   skipped,
-  hasDeleted,
 }) => {
   // Everything except the kept photo of each group is an extra copy
   const { extraCopies, extraBytes } = useMemo(() => {
@@ -44,14 +53,6 @@ export const ResultsSummary: React.FC<ResultsSummaryProps> = ({
     }
     return { extraCopies: copies, extraBytes: bytes };
   }, [groups]);
-
-  // With no groups left, the empty panel below already says what happened
-  let status: string | null = null;
-  if (groups.length > 0) {
-    status = hasDeleted
-      ? `${count(groups.length, 'group', 'groups')} left to review.`
-      : 'Prism keeps one photo from each group (marked KEPT) and moves the extra copies to the Recycle Bin. Select the groups you want to clean up.';
-  }
 
   const allInUse = skipped.length > 0 && skipped.every((s) => s.reason === 'open in another program');
   const unlisted = skippedCount - skipped.length;
@@ -79,8 +80,6 @@ export const ResultsSummary: React.FC<ResultsSummaryProps> = ({
           )}
         </p>
       </div>
-
-      {status && <p className="mt-3 px-1 text-sm text-slate-600 dark:text-slate-400">{status}</p>}
 
       {skippedCount > 0 && (
         <div

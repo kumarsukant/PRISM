@@ -80,7 +80,80 @@ export interface ScanProgressResponse {
   duplicate_groups: number;
   skipped_count: number;
   skipped: SkippedFile[]; // first 20 only; skipped_count has the total
+  coverage?: Coverage;
   error_message: string | null;
+}
+
+/** What the scan did and did not look at. Online-only (cloud) files are never opened, only counted. */
+export interface Coverage {
+  photos_checked: number;
+  folders_checked: number;
+  heic_not_checked: number;
+  raw_not_checked: number;
+  under_10kb: number;
+  online_only: number;
+  unreadable: number;
+}
+
+/** same_folder: >= 70% of the folder's duplicate memberships are in groups entirely inside it; other_folders: <= 30% */
+export type FolderTag = 'same_folder' | 'other_folders' | 'mixed';
+
+export interface FolderRef {
+  id: string;
+  relative_path: string; // "" = the scanned folder itself
+}
+
+export interface InsightFolder extends FolderRef {
+  path: string;
+  photos: number;
+  photos_with_duplicate: number;
+  share_with_duplicate: number;
+  extra_copies: number;
+  extra_bytes: number;
+  inside_share: number;
+  tag: FolderTag;
+}
+
+export interface InsightPair {
+  a: FolderRef;
+  b: FolderRef;
+  shared_groups: number;
+}
+
+/** The backend sends ids and numbers; the wording is in InsightsPanel. */
+export type InsightHeadline =
+  | { id: 'top_folder'; folder: FolderRef; photos: number; photos_with_duplicate: number; tag: FolderTag }
+  | { id: 'split'; groups_in_one_folder: number; groups_across_folders: number };
+
+export type InsightTip =
+  | { id: 'copy_suffix'; count: number }
+  | { id: 'number_suffix'; count: number }
+  | { id: 'folder_pair'; a: FolderRef; b: FolderRef; shared_groups: number }
+  | { id: 'same_folder'; folder: FolderRef; photos_with_duplicate: number }
+  | { id: 'spread'; count: number };
+
+export interface InsightsResponse {
+  status: string;
+  scan_id: string;
+  root: string;
+  root_name: string;
+  headlines: InsightHeadline[];
+  totals: {
+    photos: number;
+    folders: number;
+    folders_with_duplicates: number;
+    duplicate_groups: number;
+    groups_in_one_folder: number;
+    groups_across_folders: number;
+    groups_across_3_plus_folders: number;
+    extra_copies: number;
+    extra_bytes: number;
+  };
+  folders: InsightFolder[];
+  folders_with_duplicates_not_shown: number;
+  pairs: InsightPair[];
+  tips: InsightTip[];
+  coverage: Coverage;
 }
 export interface DeleteRequest {
   scan_id: string;
