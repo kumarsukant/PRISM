@@ -63,7 +63,7 @@ class ScanProgress:
 class FolderScanner:
     """Recursively scans folders for image files and computes MD5 hashes"""
     
-    IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tiff'}
+    IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.tif', '.tiff'}
     MIN_FILE_SIZE = 10 * 1024  # 10 KB
     
     def __init__(self, config: Config):
