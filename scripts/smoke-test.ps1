@@ -77,6 +77,15 @@ try {
     Check (@($res2.groups).Count -eq 0) 'the deleted group is gone from /scan/results'
     $del2 = Invoke-RestMethod "$BaseUrl/scan/delete" -Method Post -ContentType 'application/json' -Body $delBody -ErrorAction Stop
     Check ($del2.files_deleted -eq 0) 'deleting the same group again removes nothing'
+
+    # Nothing is locked any more: a fresh scan of the same folder must report no skipped files
+    $start2 = Invoke-RestMethod "$BaseUrl/scan/start" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10 -ErrorAction Stop
+    $deadline = (Get-Date).AddSeconds(120)
+    do {
+        Start-Sleep -Milliseconds 300
+        $prog2 = Invoke-RestMethod "$BaseUrl/scan/progress?scan_id=$($start2.scan_id)" -TimeoutSec 10 -ErrorAction Stop
+    } while ($prog2.status -eq 'in_progress' -and (Get-Date) -lt $deadline)
+    Check (($prog2.status -eq 'completed') -and ($prog2.skipped_count -eq 0) -and (@($prog2.skipped).Count -eq 0)) "clean rescan reports 0 skipped (status=$($prog2.status), skipped_count=$($prog2.skipped_count))"
 }
 catch {
     Write-Host "FAIL  exception: $($_.Exception.Message)" -ForegroundColor Red
