@@ -75,10 +75,22 @@ export interface DeleteRequest {
   group_ids: string[];
 }
 
+export interface DeleteFailure {
+  file: string;
+  reason: string;
+}
+
 export interface DeleteResponse {
-  status: string;
+  status: 'success' | 'partial' | string;
   scan_id: string;
   files_deleted: number;
   storage_freed_mb: number;
+  groups_resolved: number;
+  failed: DeleteFailure[];
+  failed_count: number;
+  total_photos: number;
+  exact_duplicates: number;
+  visual_duplicates: number;
+  duplicate_groups: number;
   message: string;
 }
