@@ -115,3 +115,4 @@ backend/build/
 backend/dist/
 backend/venv-release/
 src-tauri/binaries/
+*.tsbuildinfo
