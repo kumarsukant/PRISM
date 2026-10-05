@@ -173,42 +173,77 @@ class Deduper:
         return session
 
 class SafeDeleter:
-    """Safely deletes files by moving them to recycle bin"""
-    
+    """Safely deletes files by moving them to the Recycle Bin"""
+
     def __init__(self, config: Config):
         self.config = config
-    
-    def delete_duplicates(self, session: ScanSession, groups: List[DuplicateGroup]) -> ScanSession:
-        """Delete files in the specified duplicate groups"""
-        try:
-            deleted_count = 0
-            freed_bytes = 0
-            
-            for group in groups:
-                # Delete all photos except the kept one
-                for photo_id in group.photo_ids:
-                    if photo_id != group.kept_photo_id:
-                        photo = next((p for p in session.photos if p.id == photo_id), None)
-                        if photo and self._delete_file(photo.file_path):
-                            deleted_count += 1
-                            freed_bytes += photo.file_size_bytes
-            
-            session.files_deleted = deleted_count
-            session.storage_freed_mb = freed_bytes / (1024 * 1024)
-            
-            return session
-            
-        except Exception as e:
-            print(f"Delete error: {e}")
-            return session
-    
-    def _delete_file(self, file_path: str) -> bool:
-        """Move a single file to the Recycle Bin / Trash"""
+
+    def delete_duplicates(self, session: ScanSession, groups: List[DuplicateGroup]) -> dict:
+        """Move the duplicates of the given groups to the Recycle Bin and bring the session up to date.
+
+        The kept photo of each group is never touched. A group disappears from the session once only
+        its kept photo is left. If a file could not be moved, its group stays (holding only the photos
+        still on disk) so the user can see what failed and try again.
+        """
+        photos_by_id = {p.id: p for p in session.photos}
+        deleted_count = 0
+        freed_bytes = 0
+        gone_ids = set()
+        resolved_group_ids = []
+        failed = []
+
+        for group in groups:
+            remaining = []
+            for photo_id in group.photo_ids:
+                if photo_id == group.kept_photo_id:
+                    remaining.append(photo_id)
+                    continue
+                photo = photos_by_id.get(photo_id)
+                if photo is None:
+                    continue  # already removed from this scan
+                if not os.path.exists(photo.file_path):
+                    gone_ids.add(photo_id)  # already deleted outside Prism
+                    continue
+                error = self._delete_file(photo.file_path)
+                if error is None:
+                    deleted_count += 1
+                    freed_bytes += photo.file_size_bytes
+                    gone_ids.add(photo_id)
+                else:
+                    failed.append({"file": os.path.basename(photo.file_path), "reason": error})
+                    remaining.append(photo_id)
+            group.photo_ids = remaining
+            if len(remaining) <= 1:
+                resolved_group_ids.append(group.id)
+
+        # Replace the lists instead of editing them in place, so a request reading them at the same
+        # moment (a thumbnail, for example) always sees a complete list.
+        resolved = set(resolved_group_ids)
+        session.duplicate_groups = [g for g in session.duplicate_groups if g.id not in resolved]
+        session.photos = [p for p in session.photos if p.id not in gone_ids]
+        session.files_deleted += deleted_count
+        session.storage_freed_mb += freed_bytes / (1024 * 1024)
+        session.total_photos = len(session.photos)
+        session.exact_duplicates = sum(
+            len(g.photo_ids) - 1 for g in session.duplicate_groups if g.group_type == "exact"
+        )
+        session.visual_duplicates = sum(
+            len(g.photo_ids) - 1 for g in session.duplicate_groups if g.group_type == "visual"
+        )
+
+        return {
+            "files_deleted": deleted_count,
+            "freed_bytes": freed_bytes,
+            "resolved_group_ids": resolved_group_ids,
+            "failed": failed,
+        }
+
+    def _delete_file(self, file_path: str) -> Optional[str]:
+        """Move one file to the Recycle Bin. Returns None on success, or a short error message."""
         try:
             from send2trash import send2trash
             send2trash(file_path)
-            return True
+            return None
         except Exception as e:
             print(f"Could not move {file_path} to Recycle Bin: {e}")
-            return False
-        
+            return (str(e) or type(e).__name__)[:200]
