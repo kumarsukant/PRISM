@@ -1,6 +1,6 @@
 // src/components/ResultsGrid.tsx
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronLeft, ChevronRight, Trash2, Loader2 } from 'lucide-react';
 import type { DuplicateGroup } from '../types';
 import { api } from '../services/api';
@@ -31,9 +31,15 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
   const pageGroups = groups.slice(startIndex, startIndex + PAGE_SIZE);
   const pageIds = pageGroups.map((g) => g.id);
 
-  // Jump back to the top of the list whenever the page changes
+  // When the page changes, bring the top of this list into view (not the top of the window, which
+  // would land on the summary). Compares with the previous page rather than skipping the first
+  // render, because React StrictMode runs effects twice in development.
+  const listTopRef = useRef<HTMLDivElement>(null);
+  const shownPage = useRef(currentPage);
   useEffect(() => {
-    window.scrollTo({ top: 0 });
+    if (shownPage.current === currentPage) return;
+    shownPage.current = currentPage;
+    listTopRef.current?.scrollIntoView({ block: 'start' });
   }, [currentPage]);
 
   // Forget selected groups that are no longer in the list
@@ -118,7 +124,10 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
     ) : null;
 
   return (
-    <div className="w-full max-w-4xl mx-auto p-8 bg-white dark:bg-slate-900 rounded-lg shadow-lg">
+    <div
+      ref={listTopRef}
+      className="w-full max-w-4xl mx-auto p-8 bg-white dark:bg-slate-900 rounded-lg shadow-lg scroll-mt-28"
+    >
       {/* Header */}
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">

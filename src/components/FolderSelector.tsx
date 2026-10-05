@@ -85,9 +85,8 @@ export const FolderSelector: React.FC<FolderSelectorProps> = ({
 
       <div className="mt-6 p-4 bg-slate-100 dark:bg-slate-800 rounded-lg">
         <p className="text-xs text-slate-600 dark:text-slate-400">
-          💡 <strong>Tip:</strong> Prism will scan this folder and all subfolders for photos.
-          Exact duplicates (bit-for-bit identical) and visual duplicates (AI-detected similar)
-          will be identified.
+          💡 <strong>Tip:</strong> Prism scans this folder and all its subfolders and finds exact
+          copies of your photos. Nothing is changed until you choose what to delete.
         </p>
       </div>
     </div>
