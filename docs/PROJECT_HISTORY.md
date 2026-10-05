@@ -197,19 +197,20 @@ Repository `https://github.com/kumarsukant/PRISM`. Line endings: Git converts LF
 7. `68e95de fix: deterministic keeper selection (shortest name, oldest, then path)`
 - Merge: **`495de33 Checkpoint 4: package backend as Tauri sidecar, defer visual dedup to v0.2`**, tag **`v0.1.0-cp4`**, pushed.
 
-**Checkpoint 5, branch `checkpoint-5-async-scan` (messages confirmed from the instructions; hashes not shown):**
-1. `feat: run scans in a background thread with phase and progress reporting`
-2. `test: async smoke test and scan responsiveness script`
-3. `feat: poll scan progress and show a live progress screen`
-4. `feat: sticky results header with back-to-folder button`
-5. `chore: stop tracking TypeScript build cache` `[INSTRUCTED]`
+**Checkpoint 5, branch `checkpoint-5-async-scan` (all confirmed from `git log` on 2026-10-05):**
+1. `53a5bb2 feat: run scans in a background thread with phase and progress reporting`
+2. `ccd11fc test: async smoke test and scan responsiveness script`
+3. `0fe953b feat: poll scan progress and show a live progress screen`
+4. `464233d feat: sticky results header with back-to-folder button`
+5. `8d5de94 chore: stop tracking TypeScript build cache`
 - Merge: **`902187a Checkpoint 5: asynchronous scanning with live progress screen`**, tag **`v0.1.1-cp5`**, pushed (`495de33..902187a`).
 
-**Checkpoint 6, branch `checkpoint-6-pagination` (created from `902187a`; not merged):**
-1. `feat: paginate results grid with page-level and all-groups selection` `[INSTRUCTED]`
-2. `b6dc3c3 feat: delete updates the scan in place, reports failures, runs off the event loop` (confirmed)
-3. `test: smoke test covers in-place delete behaviour` `[VERIFY]` (the 17-check update was applied and passed; the commit was instructed)
-4. `feat: stay on results after deleting, with a confirmation or warning banner` `[VERIFY]`
+**Checkpoint 6, branch `checkpoint-6-pagination` (created from `902187a`; not merged; all confirmed from `git log` on 2026-10-05):**
+1. `f6366e7 feat: paginate results grid with page-level and all-groups selection`
+2. `b6dc3c3 feat: delete updates the scan in place, reports failures, runs off the event loop`
+3. `deb52da test: smoke test covers in-place delete behaviour` (the 17-check smoke test)
+4. `e87697c feat: stay on results after deleting, with a confirmation or warning banner`
+5. `2fe436e docs: add Claude Code handoff` (this document and `CLAUDE.md`)
 
 ## 6. Chronology: what happened, in order
 
@@ -256,7 +257,7 @@ Repository `https://github.com/kumarsukant/PRISM`. Line endings: Git converts LF
 - *Step 3 (frontend):* types, `waitForScan`, `ScanningView.tsx`, `App.tsx`. First `tsc` failed with 5 errors because `ScanStartResponse` had been narrowed to `{status, scan_id}` while `App.tsx` still typed the results summary with it; fixed by adding the **`ScanSummary`** type. Then clean.
 - *Step 4 (dev test):* owner's screenshot on D:\ showed 4%, 941 of 24,263 photos, 9.9 photos/sec, "About 39m 27s left" (consistent: 23,322 / 9.9 ≈ 39 min). SSD folder test: 198 files left after deleting two groups. All fine.
 - *Step 5 (installer):* the exe was rebuilt but the MSI timestamp (22:10) was older than the exe (22:46), which would have installed the old backend; caught by comparing timestamps, MSI rebuilt (23:25). The installed app showed the progress screen on D:\; closing the window mid-scan left no processes.
-- *Owner feedback during testing:* "Back to folder picker always comes at the bottom of the page; with a long list someone must scroll all the way down." Fixed: compact **sticky header** with the button at top right; bottom button removed; empty-state "Scan Another Folder" kept. Also found that `tsconfig.tsbuildinfo` (TypeScript's incremental cache) was tracked in git and showed as modified after every build; untracking plus `*.tsbuildinfo` in `.gitignore` was instructed `[INSTRUCTED]`.
+- *Owner feedback during testing:* "Back to folder picker always comes at the bottom of the page; with a long list someone must scroll all the way down." Fixed: compact **sticky header** with the button at top right; bottom button removed; empty-state "Scan Another Folder" kept. Also found that `tsconfig.tsbuildinfo` (TypeScript's incremental cache) was tracked in git and showed as modified after every build; untracking plus `*.tsbuildinfo` in `.gitignore` was done in `8d5de94` (confirmed 2026-10-05: not tracked, and listed in `.gitignore`).
 - *Rebuild and merge:* final MSI built and installed; the owner confirmed all tests passed; merged as `902187a`, tag `v0.1.1-cp5`, pushed.
 
 ### 6.3 Checkpoint 6: pagination and "stay on results after delete" (in progress)
