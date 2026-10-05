@@ -64,7 +64,7 @@ npm run tauri dev
 
 # Checks
 npx tsc --noEmit
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-test.ps1            # needs a backend on :8000, 17 checks
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-test.ps1            # needs a backend on :8000, 19 checks
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\scan-responsiveness.ps1 -Folder <folder>   # scan only, never deletes
 
 # Release (ORDER MATTERS: backend first, then the MSI)
