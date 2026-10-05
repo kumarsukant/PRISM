@@ -88,7 +88,7 @@ export const ScanningView: React.FC<ScanningViewProps> = ({ progress }) => {
             </p>
           </div>
         )}
-        <p className="mt-6 text-xs text-center text-slate-500 dark:text-slate-500">
+        <p className="mt-6 text-xs text-center text-slate-500 dark:text-slate-400">
           Large libraries and external drives can take a while. Your photos are never changed during a scan.
         </p>
       </div>

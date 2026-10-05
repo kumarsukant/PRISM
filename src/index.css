@@ -4,6 +4,8 @@
 
 html {
   scroll-behavior: smooth;
+  /* Built-in controls (checkboxes, scrollbars, focus rings) follow the Windows light/dark setting too */
+  color-scheme: light dark;
 }
 
 body {

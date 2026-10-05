@@ -201,7 +201,7 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => handleToggleGroup(group.id)}
-                      className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-amber-600 dark:text-amber-500 cursor-pointer"
+                      className="w-5 h-5 rounded border-slate-300 dark:border-slate-600 text-amber-600 dark:text-amber-500 accent-amber-600 cursor-pointer"
                       onClick={(e) => e.stopPropagation()}
                     />
                     <span className="text-sm font-semibold text-slate-500 dark:text-slate-400">
@@ -281,22 +281,20 @@ export const ResultsGrid: React.FC<ResultsGridProps> = ({
 
       {renderPager()}
 
-      {/* Delete Summary */}
+      {/* Delete bar: one compact row, pinned, so it covers as little of the groups as possible */}
       {selectedGroupIds.size > 0 && (
-        <div className="sticky bottom-4 mt-8 p-6 bg-amber-50 dark:bg-amber-950 rounded-lg border border-amber-200 dark:border-amber-800 shadow-xl">
-          <p className="text-sm font-semibold text-amber-900 dark:text-amber-200 mb-2">
-            Delete Summary
-          </p>
-          <p className="text-sm text-amber-800 dark:text-amber-300 mb-4">
-            You're about to delete {selectedGroupIds.size} group{selectedGroupIds.size !== 1 ? 's' : ''} of
-            duplicates ({selectedSizeMb} MB)
-            {selectedElsewhere > 0 ? `, including ${selectedElsewhere} on other pages` : ''}. This action
-            moves files to Recycle Bin and can be undone.
+        <div className="sticky bottom-4 mt-8 px-4 py-3 bg-amber-50 dark:bg-amber-950 rounded-lg border border-amber-200 dark:border-amber-800 shadow-xl flex items-center justify-between gap-4">
+          <p className="min-w-0 text-sm text-amber-900 dark:text-amber-200">
+            <strong className="font-semibold">
+              {selectedGroupIds.size} group{selectedGroupIds.size !== 1 ? 's' : ''} ({selectedSizeMb} MB)
+            </strong>
+            {selectedElsewhere > 0 ? `, including ${selectedElsewhere} on other pages` : ''}. Files go to
+            the Recycle Bin, so you can undo this.
           </p>
           <button
             onClick={() => onDelete(Array.from(selectedGroupIds))}
             disabled={isDeleting}
-            className={`w-full py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all ${
+            className={`shrink-0 py-2 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all ${
               isDeleting
                 ? 'bg-red-400 dark:bg-red-600 text-white cursor-not-allowed opacity-75'
                 : 'bg-red-600 dark:bg-red-700 text-white hover:bg-red-700 dark:hover:bg-red-800 active:scale-95'

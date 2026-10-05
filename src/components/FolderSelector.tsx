@@ -68,7 +68,7 @@ export const FolderSelector: React.FC<FolderSelectorProps> = ({
       <button
         onClick={handleSelectFolder}
         disabled={isLoading}
-        className={isLoading ? 'w-full py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 bg-amber-400 dark:bg-amber-600 text-amber-900 cursor-not-allowed opacity-75' : 'w-full py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 bg-amber-500 dark:bg-amber-600 text-white hover:bg-amber-600 dark:hover:bg-amber-700 active:scale-95'}
+        className={isLoading ? 'w-full py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 bg-amber-400 dark:bg-amber-600 text-amber-900 cursor-not-allowed opacity-75' : 'w-full py-3 px-4 rounded-lg font-semibold flex items-center justify-center gap-2 bg-amber-500 text-amber-950 hover:bg-amber-400 active:scale-95'}
       >
         {isLoading ? (
           <>

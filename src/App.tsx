@@ -261,7 +261,7 @@ function App() {
                   : 'No duplicates found! Your photos are all unique.'}
               </p>              <button
                 onClick={handleReset}
-                className="mt-4 px-6 py-2 bg-amber-600 dark:bg-amber-700 text-white rounded-lg font-semibold hover:bg-amber-700 dark:hover:bg-amber-800"
+                className="mt-4 px-6 py-2 bg-amber-500 text-amber-950 rounded-lg font-semibold hover:bg-amber-400"
               >
                 Scan Another Folder
               </button>
@@ -287,7 +287,7 @@ function App() {
           </p>
           <button
             onClick={handleReset}
-            className="w-full py-3 px-4 bg-amber-600 dark:bg-amber-700 text-white rounded-lg font-semibold hover:bg-amber-700 dark:hover:bg-amber-800"
+            className="w-full py-3 px-4 bg-amber-500 text-amber-950 rounded-lg font-semibold hover:bg-amber-400"
           >
             Try Again
           </button>
