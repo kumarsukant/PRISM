@@ -47,7 +47,7 @@ from services.services import FolderScanner, ScanProgress, Deduper, SafeDeleter
 
 app = FastAPI(
     title="PRISM Backend",
-    version="0.2.0",
+    version="0.1.4",
     description="AI-powered photo deduplication backend"
 )
 
@@ -72,7 +72,7 @@ async def health():
     return {
         "status": "ok",
         "message": "PRISM backend is running",
-        "version": "0.2.0"
+        "version": "0.1.4"
     }
 
 def _run_scan(session: ScanSession) -> None:
