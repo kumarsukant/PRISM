@@ -2,7 +2,7 @@
 
 **Purpose.** This document transfers everything learned and built in a long claude.ai chat between the owner (Sukant) and Claude, so that Claude Code can continue without the owner re-explaining anything. It covers: where the project stood, every decision and why, every change to the code, every incident and fix, test assets and measurements, and the backlog.
 
-**Date of writing:** 2026-10-05. **Covers:** the state at the start of Checkpoint 4 (carried in from an earlier chat that hit its 100-image limit), all of Checkpoint 4, all of Checkpoint 5, and most of Checkpoint 6.
+**Date of writing:** 2026-10-05. **Covers:** the state at the start of Checkpoint 4 (carried in from an earlier chat that hit its 100-image limit), all of Checkpoint 4, all of Checkpoint 5, and most of Checkpoint 6. **Updated** later on 2026-10-05 after the first Claude Code session (section 6.5; reference sections 4, 5, 7, 8, 10 to 13 brought up to date).
 
 **How to read the confidence markers.**
 - Facts shown with commit hashes, command output or screenshots in the chat are **confirmed**.
@@ -88,19 +88,20 @@ React UI (WebView2)  --HTTP-->  FastAPI on 127.0.0.1:<port>  --->  Pillow / hash
 | `backend/app/config.py` | `Config` + `_data_dir()` |
 | `backend/app/models/scan.py` | dataclasses |
 | `backend/app/models/__init__.py` | `from .scan import PhotoRecord, DuplicateGroup, ScanSession` |
-| `backend/app/services/services.py` | `ScanProgress`, `FolderScanner`, `Deduper`, `SafeDeleter` |
+| `backend/app/services/services.py` | `ScanProgress`, `FolderScanner`, `Deduper`, `SafeDeleter`, `describe_file_error`, `_windows_open_error` |
+| `backend/tests/test_skipped_files.py` | stdlib `unittest`, 7 tests (added 2026-10-05; see 8) |
 | `backend/app/services/__init__.py`, `utils/__init__.py` | docstring only |
 | `backend/app/services/deduper.py` | **DEAD**: old CLIP deduper (imports numpy, torch, open_clip); not imported by live code |
 | `backend/app/services/main.py` | **DEAD**: an old copy of the server (mentions CLIP); not imported |
 | `backend/requirements-release.txt` | pinned runtime dependencies (see 14) |
 | `backend/requirements.txt` | **STALE** (lists torch 2.1.1, numpy 1.26.2 etc. that cannot be installed on 3.14) |
 | `scripts/build-backend.ps1` | builds the frozen backend (5 stages, below) |
-| `scripts/smoke-test.ps1` | 17-check API test, parameters `-BaseUrl`, `-PythonExe` |
+| `scripts/smoke-test.ps1` | 20-check API test (17 until 2026-10-05), parameters `-BaseUrl`, `-PythonExe` |
 | `scripts/scan-responsiveness.ps1` | scan-only responsiveness test, `-Folder`, `-BaseUrl` |
 | `src/App.tsx` | state machine and screens |
 | `src/components/FolderSelector.tsx` | folder picker using the Tauri dialog plugin **(never seen)** |
 | `src/components/ScanningView.tsx` | live progress screen (new in CP5) |
-| `src/components/ScanProgress.tsx` | the results summary card (name is misleading; see 10) |
+| `src/components/ResultsSummary.tsx` | results summary: one-line strip, status line, skipped-files notice. **Replaced `ScanProgress.tsx`** (the old tall card, deleted in `eed8354`) |
 | `src/components/ResultsGrid.tsx` | paginated duplicate groups |
 | `src/services/api.ts`, `src/types.ts` | API client and types |
 | `src/main.tsx`, `src/index.css`, `index.html`, `package.json`, `vite.config.ts`, `tailwind.config.*`, `postcss.config.js`, `tsconfig.json`, `tsconfig.node.json` | **(never seen, except that they exist)**; `vite.config.ts`, both tsconfigs and `postcss.config.js` were created in earlier checkpoints |
@@ -122,7 +123,8 @@ React UI (WebView2)  --HTTP-->  FastAPI on 127.0.0.1:<port>  --->  Pillow / hash
 **Scanner (`FolderScanner`)**
 - `os.walk`; accepted extensions: `.jpg .jpeg .png .gif .bmp .webp .tiff`; files under **10 KB are silently skipped**. (`Config.IMAGE_EXTENSIONS` also lists `.heic` and `.raw`, but the scanner uses its own set, so **HEIC and RAW are not scanned**; this matters for phone photo libraries.)
 - Discovery reports progress every 200 files found (`phase="discovering"`); when hashing starts it reports `0/N` (`phase="hashing"`).
-- Hashing: `ThreadPoolExecutor(max_workers=4)`; `_process_image` reads the file in **4096-byte chunks** for MD5, then opens it with Pillow for width, height, mode (on failure: 0, 0, "unknown"). Unreadable files (for example locked ones) raise inside `_process_image`, print `Error processing <path>: <error>` and return `None`; they are **dropped silently** (no count shown to the user).
+- Hashing: `ThreadPoolExecutor(max_workers=4)`; `_process_image` reads the file in **4096-byte chunks** for MD5, then opens it with Pillow for width, height, mode (on failure: 0, 0, "unknown"). It returns `(photo, None)` or `(None, reason)`.
+- **Skipped files (since `098df1e`, 2026-10-05):** a file that cannot be read (in `getsize` during discovery, or while hashing) is recorded in `session.skipped_files` as `{file, path, reason}`, sorted by path, and logged as `Error processing ...` / `Skipping ...`. Before this, such files were dropped silently. `reason` comes from `describe_file_error(error, action, file_path)`: `"open in another program"` (Windows error 32/33), `"no longer there (moved or deleted)"` (FileNotFoundError, 2/3), `"Windows denied access"` (PermissionError, 5), else `"could not be <read|moved> (<ExceptionName>)"`. Python's `open()` reports a locked file as a bare `PermissionError` with no `winerror`, so on that path `_windows_open_error` calls `CreateFileW` via `ctypes` to ask Windows which it is (32 vs 5). Files under 10 KB and non-image extensions are still filtered without being reported (by design; see 10).
 - The scanner no longer sets `status="completed"` itself (that caused a race where a poller could fetch empty results); `_run_scan` does it.
 
 **Deduper**
@@ -141,9 +143,9 @@ React UI (WebView2)  --HTTP-->  FastAPI on 127.0.0.1:<port>  --->  Pillow / hash
 |---|---|
 | `GET /health` | `{status:"ok", message:"PRISM backend is running", version:"0.1.0"}` |
 | `POST /scan/start` body `{folder_path}` | 400 if missing or not an existing directory; otherwise registers the session immediately, starts the worker thread, returns `{status:"started", scan_id}` |
-| `GET /scan/progress?scan_id=` | 404 unknown id; else `{status, phase, scan_id, files_processed, files_total, total_photos, exact_duplicates, visual_duplicates, duplicate_groups, error_message}`. `status` in_progress/completed/failed/cancelled; `phase` queued/discovering/hashing/grouping/completed/failed |
+| `GET /scan/progress?scan_id=` | 404 unknown id; else `{status, phase, scan_id, files_processed, files_total, total_photos, exact_duplicates, visual_duplicates, duplicate_groups, skipped_count, skipped, error_message}`. `skipped` is the first **20** `{file, path, reason}` entries (capped, like delete `failed`); `skipped_count` is the full total (both added in `098df1e`). `status` in_progress/completed/failed/cancelled; `phase` queued/discovering/hashing/grouping/completed/failed |
 | `GET /scan/results?scan_id=` | 404 unknown; **409** until `status == "completed"`; else `{status:"complete", scan_id, total_photos, duplicate_groups, groups:[{id, type, confidence, kept_photo_id, photos:[{id, file_path, file_size_bytes, width, height, is_kept}]}]}` |
-| `POST /scan/delete` body `{scan_id, group_ids}` | plain `def` (thread pool). 400 no scan_id; 404 unknown; 409 not complete; else `{status:"success"|"partial", scan_id, files_deleted, storage_freed_mb, groups_resolved, failed (first 20), failed_count, total_photos, exact_duplicates, visual_duplicates, duplicate_groups, message}` |
+| `POST /scan/delete` body `{scan_id, group_ids}` | plain `def` (thread pool). 400 no scan_id; 404 unknown; 409 not complete; else `{status:"success"|"partial", scan_id, files_deleted, storage_freed_mb, groups_resolved, failed (first 20), failed_count, total_photos, exact_duplicates, visual_duplicates, duplicate_groups, message}`. Each `failed` entry is `{file, reason}`; since `098df1e` the reason is plain language from `describe_file_error` (e.g. `"open in another program"`), not the raw `[WinError 32] ... C:\PRISM_~1\...` text |
 | `GET /thumbnail?path=` | 403 if the path is not a photo in any scan (the allow-list is rebuilt by iterating every photo of every session **on every request**); 404 missing file; 500 on failure; else JPEG. 300 px thumbnail, quality 80, `img.draft("RGB",(600,600))`, cached at `%TEMP%\prism_thumbs\<md5 of normcased path>.jpg` |
 | `GET /stats` | `{completed_scans, total_scans_processed, db_path}` (the CLIP fields were removed) |
 
@@ -151,7 +153,7 @@ React UI (WebView2)  --HTTP-->  FastAPI on 127.0.0.1:<port>  --->  Pillow / hash
 
 - `PhotoRecord`: `id` (uuid4 str), `file_path`, `file_size_bytes`, `file_hash_md5`, `file_hash_sha256` (unused), `visual_embedding` (unused, for CLIP), `width_px`, `height_px`, `color_space`, `file_format` (unused), `created_date`, `modified_date` (unused), `indexed_at`.
 - `DuplicateGroup`: `id`, `group_type` ("exact" or "visual"), `confidence_score`, `photo_ids`, `kept_photo_id`, `created_at`, `user_reviewed`, `user_action`, `deleted_at` (the last three are unused).
-- `ScanSession`: `id`, `folder_path`, `started_at`, `completed_at` (never set), `total_photos`, `exact_duplicates`, `visual_duplicates`, `files_deleted`, `storage_freed_mb`, `status`, `error_message`, **`phase`, `files_processed`, `files_total`** (added in CP5), `photos`, `duplicate_groups`.
+- `ScanSession`: `id`, `folder_path`, `started_at`, `completed_at` (never set), `total_photos`, `exact_duplicates`, `visual_duplicates`, `files_deleted`, `storage_freed_mb`, `status`, `error_message`, **`phase`, `files_processed`, `files_total`** (added in CP5), **`skipped_files`** (list of `{file, path, reason}`, added in `098df1e`), `photos`, `duplicate_groups`.
 
 ### 4.6 Frontend behaviour
 
@@ -160,8 +162,9 @@ React UI (WebView2)  --HTTP-->  FastAPI on 127.0.0.1:<port>  --->  Pillow / hash
 - `handleFolderSelect`: resets progress, notice and `clearedByDeleting`, sets `scanning`, `api.startScan`, `api.waitForScan(scanId, setScanProgress)`, `api.getScanResults`, then builds a `ScanSummary` from the final progress response.
 - `waitForScan` polls `/scan/progress` every 400 ms, tolerates up to 5 consecutive failed polls, throws on `failed`/`cancelled` with the backend's `error_message`.
 - `ScanningView`: discovering shows a spinner and "Found N photos so far..." (a count only; the total is unknown); hashing shows percentage, an amber bar, "N of TOTAL photos", a smoothed photos-per-second rate (sampled at least every 1.5 s, smoothing 0.7 old / 0.3 new) and "About Xm Ys left" (only after at least 3 s of hashing); grouping shows a spinner. Footer text: "Large libraries and external drives can take a while. Your photos are never changed during a scan."
-- `results` screen: sticky header (title, tagline, **"← Back to Folder Selection"** button at top right), then the delete **notice** banner, then `ScanProgress` (the summary card), then `ResultsGrid`, or an "empty" panel when there are no groups.
-- `ResultsGrid` (CP6): `PAGE_SIZE = 20`, app-side paging, pager (Previous / "Page X of Y" / Next) above and below the list; "Select this page" (or "Select all" when there is a single page), "Select all N groups" (shown when several pages and not everything is selected), "Clear selection"; selection survives page changes and is pruned when groups disappear; the current page is clamped if the list shrinks; the window scrolls to the top on page change (`window.scrollTo`, i.e. top of the *page*, not of the list; see 10); a pinned (`sticky bottom-4`) delete bar shows count, MB, and "including N on other pages". Each group card shows confidence, "N duplicates • X MB", a KEPT card (green) and DELETE cards (red) with lazy thumbnails. The whole card toggles selection; the checkbox calls the same handler and stops propagation.
+- `results` screen: sticky header (title, tagline, **"← Back to Folder Selection"** button at top right), then the delete **notice** banner, then `ResultsSummary`, then `ResultsGrid`, or an "empty" panel when there are no groups. The banner, summary and grid share the `max-w-4xl` column.
+- `ResultsSummary` (since `eed8354`, replacing the `ScanProgress` card): a strip with the folder path (truncated, full path on hover) and "N photos · N duplicate groups · N extra copies (X MB)" (extra copies and size computed from the current groups); a status line ("Prism keeps one photo from each group (marked KEPT)..." before any delete, "N groups left to review." after one, nothing when there are no groups because the empty panel explains); and, when `skipped_count > 0`, an amber notice "N photo(s) couldn't be read and was/were skipped, so it isn't / they aren't in these results." with "Close the program that's using it/them, then scan again." when every reason is "open in another program" (else "See why below, then scan again.") and a collapsible "Show file(s)" list (`file: reason`, plus "...and N more" beyond the 20 listed). The notice persists after deletes (those photos were still not scanned) and disappears on a new scan. `ScanSummary` now carries `folder_path`, `skipped_count`, `skipped`.
+- `ResultsGrid` (CP6): `PAGE_SIZE = 20`, app-side paging, pager (Previous / "Page X of Y" / Next) above and below the list; "Select this page" (or "Select all" when there is a single page), "Select all N groups" (shown when several pages and not everything is selected), "Clear selection"; selection survives page changes and is pruned when groups disappear; the current page is clamped if the list shrinks; on page change the top of the groups list scrolls into view (`scrollIntoView` with `scroll-mt-28` to clear the sticky header; it compares with the previously shown page instead of skipping the first render, because `main.tsx` uses `React.StrictMode`, which runs effects twice in dev; before `eed8354` it was `window.scrollTo` to the top of the *page*); a pinned (`sticky bottom-4`) delete bar shows count, MB, and "including N on other pages". Each group card shows confidence, "N duplicates • X MB", a KEPT card (green) and DELETE cards (red) with lazy thumbnails. The whole card toggles selection; the checkbox calls the same handler and stops propagation.
 - Delete flow (CP6): `handleDeleteDuplicates` calls `api.deleteDuplicates`, then **re-fetches `/scan/results`**, updates the summary counts from the delete response, sets a notice: green "Deleted N files, freed X MB. Moved to the Recycle Bin, so you can restore them."; amber when `failed_count > 0` ("...but K could not be moved to the Recycle Bin." plus up to 5 `file: reason` lines, "...and N more", "Those groups are still listed so you can try again."); red "Could not delete: <message>" on exceptions (the user stays on the results screen). When no groups remain after a cleanup the empty panel says "All duplicates cleared. Nice and tidy!" with a **Scan Another Folder** button; with zero groups straight after a scan it says "No duplicates found! Your photos are all unique."
 
 ### 4.7 Tauri / Rust
@@ -211,6 +214,18 @@ Repository `https://github.com/kumarsukant/PRISM`. Line endings: Git converts LF
 3. `deb52da test: smoke test covers in-place delete behaviour` (the 17-check smoke test)
 4. `e87697c feat: stay on results after deleting, with a confirmation or warning banner`
 5. `2fe436e docs: add Claude Code handoff` (this document and `CLAUDE.md`)
+
+Added in the first Claude Code session (2026-10-05; see 6.5):
+
+6. `2a6d46f docs: replace verification markers with confirmed commit hashes`
+7. `098df1e feat: report files the scanner could not read, with plain-language reasons` (backend, `/scan/progress` fields, delete-failure wording, smoke test 17 → 19)
+8. `3415415 docs: smoke test now has 19 checks`
+9. `eed8354 feat: summary strip with skipped-files notice replaces the scan-complete card` (6 files: `App.tsx`, `FolderSelector.tsx`, `ResultsGrid.tsx`, `ResultsSummary.tsx` added, `ScanProgress.tsx` deleted, `types.ts`)
+10. `6666c15 chore: add desktop UI dev server to the browser-pane launch config` (`.claude/launch.json` only)
+11. `5c4611d test: unit tests for skipped files; smoke test checks a clean rescan reports 0 skipped` (smoke test 19 → 20)
+12. the commit that adds this update to the docs (`docs: ...`; see `git log`)
+
+The branch has not been pushed.
 
 ## 6. Chronology: what happened, in order
 
@@ -280,6 +295,16 @@ Repository `https://github.com/kumarsukant/PRISM`. Line endings: Git converts LF
 
 The owner noticed that the copy-paste loop (assistant writes a patch script, owner pastes it, owner pastes output back) caused most of the friction (scripts not run, `NO MATCH` on stale file versions, the 14-versus-17 check confusion). The recommendation was to move the **building** to Claude Code (it reads real files, edits directly, runs `tsc`/tests/smoke test itself, commits) and keep claude.ai for product and business decisions. The owner asked for this document so nothing has to be re-explained.
 
+### 6.5 First Claude Code session (2026-10-05): verification, skipped files, summary strip
+
+- *Verification (section 12, items 1 to 4):* all CP6 commits confirmed in `git log`; `*.tsbuildinfo` untracked; `tsc` clean; 17-check smoke test passed on a fresh backend. The **locked-file delete test** was run through the API (not the UI) with a real lock held by a hidden helper process that releases in `finally`: 21/21 checks passed (`status=partial`, the locked file untouched, its group still listed, retry after release succeeds, disk counts 199 → 198 → 195 after 5 groups → 100 after clearing, every original kept). "Back to Folder Selection then a new scan shows no old banner" was confirmed by **reading** `App.tsx` (`handleFolderSelect` calls `setNotice(null)`), not by clicking. Item 6 (clean-machine test) is **blocked**: the machine runs Windows 11 Home, which has no Windows Sandbox or Hyper-V; it needs a second PC or a VirtualBox VM.
+- *Findings that led to the work below:* the delete-failure reason shown to users was raw (`[WinError 32] ... ['C:\\PRISM_~1\\IMG005~1.PNG']`, an 8.3 short path); the folder-picker tip promised "visual duplicates (AI-detected similar)", which v0.1 does not do.
+- *Step 1, backend (`098df1e`):* skipped-files recording and `describe_file_error` (see 4.3, 4.4). The new smoke check caught a real bug on its first run: Python raises a bare `PermissionError` for a **locked** file, so the first version labelled it "Windows denied access"; fixed with the `CreateFileW` probe. A scratch check confirmed a truly access-denied file (via `icacls /deny <user>:(RD)`) still gets "Windows denied access".
+- *Step 2, frontend (`eed8354`):* `ResultsSummary` replaces `ScanProgress`; pager scrolls to the list; tip text corrected. Verified in Claude's browser pane at 800x600 against a live dev backend, with the Tauri folder dialog stubbed from the page console (no stub in `src`): strip "198 photos · 98 duplicate groups · 98 extra copies (25.3 MB)" with 2 locked copies, plural notice and file list, bottom-pager Next lands the list just below the header, a 2-group delete updates strip and status ("96 groups left to review."), Back + rescan clears banner and notice, Select all + delete leaves "100 photos · 0 duplicate groups", no status line, the "All duplicates cleared" panel, and 100 originals on disk. No console errors. **Not verified there:** the native dialog, the Tauri window, dark mode.
+- *Step 2b (`5c4611d`):* owner asked for a unit test with a *simulated* unreadable file (a real lock is flaky) and a clean-scan smoke check: `backend/tests/test_skipped_files.py` (7 tests) and smoke check 20.
+- *Mistakes during the session (fixed, not repeated):* a first commit of step 2 recorded only the staged deletion of `ScanProgress.tsx` because `git add` aborted on that path (`fatal: pathspec`); it was never pushed and was redone with `git reset --soft HEAD~2` (stage folders with `git add -A src` when a file was removed). A scratch test denied `(R)` on a temp file, which also denies reading the ACL, so it could not be undone with `icacls`; it was removed with `[IO.File]::Delete` (use `(RD)`).
+- *Open:* the owner tests the native dialog, the locked-file scan notice and the locked-file delete failure in `tauri dev`; then the backend exe and the MSI are built (approved: backend first, normal terminal).
+
 ## 7. Decisions log (with reasoning)
 
 | Decision | Reasoning |
@@ -300,18 +325,25 @@ The owner noticed that the copy-paste loop (assistant writes a patch script, own
 | A group with a failed file stays listed | Lets the user retry; never claims success it did not achieve |
 | Treat "file already gone" as success | Prevents groups getting stuck |
 | `/scan/delete` as plain `def` | Runs in a thread pool; does not block `/health` |
+| Report unreadable files instead of dropping them; still never delete them | Skipping is safe, silence is not: a user seeing 199 of 200 deserves the reason and what to do |
+| User-facing reasons are short plain phrases; raw errors only in the log | `[WinError 32] ... C:\PRISM_~1\...` is not actionable; "open in another program" is |
+| Probe Windows (`CreateFileW`) only when `open()` gives a bare `PermissionError` | "In use" and "access denied" need different advice; the probe costs nothing on the happy path |
+| Skipped list capped at 20 in `/scan/progress`, total in `skipped_count` | Same as delete `failed`; keeps the response small on a library with thousands of locked/offline files |
+| One-line summary strip instead of the tall card | At 800x600 the card hid the groups; the counts fit on one line; the empty panel and banner already carry the messages |
+| Unit tests use stdlib `unittest` and a *simulated* unreadable file | No new dependency; a real lock is timing-dependent (the smoke test keeps one real-lock check) |
 | Roadmap order (owner's): async scan → pagination → `/thumbnail` via SQLite → perceptual hash → code signing | First user-visible pain first; wait for real-user feedback before v0.2 |
 
 ## 8. Test assets, scripts and measurements
 
 **Scripts (all in `scripts/`)**
-- `smoke-test.ps1 [-BaseUrl http://127.0.0.1:8000] [-PythonExe <python with Pillow>]`: generates three random 128x128 PNGs (two identical) in a temp folder and checks, in order: `/health`; `/stats`; nonexistent folder → 400; unknown scan id → 404; `/scan/start` returns `started` + `scan_id`; polls until completed; 3 photos; 1 exact duplicate; 0 visual duplicates; 1 group; group has 2 photos; `/thumbnail` returns `image/jpeg`; delete removes 1 file; 2 files remain on disk (the duplicate went to the Recycle Bin); delete response carries updated counts (groups=0, photos=2); the deleted group is gone from `/scan/results`; deleting it again removes 0. **17 PASS lines, then `SMOKE TEST PASSED`.** Exits non-zero on failure. Puts one temp image in the Recycle Bin per run (expected).
-- `build-backend.ps1`: see 4.8; success line `BUILD OK: ...prism-backend-x86_64-pc-windows-msvc.exe (21.1 MB)`; it runs the 17-check smoke test against the frozen exe.
+- `smoke-test.ps1 [-BaseUrl http://127.0.0.1:8000] [-PythonExe <python with Pillow>]`: generates four random 128x128 PNGs (`a`, `b` = copy of `a`, `c`, `d`) in a temp folder, holds `d.png` open with no sharing for the whole scan (released in `finally`, then removed), and checks, in order: `/health`; `/stats`; nonexistent folder → 400; unknown scan id → 404; `/scan/start` returns `started` + `scan_id`; polls until completed; 3 photos; **1 skipped; skipped file is `d.png` with reason "open in another program"**; 1 exact duplicate; 0 visual duplicates; 1 group; group has 2 photos; `/thumbnail` returns `image/jpeg`; delete removes 1 file; 2 files remain on disk (the duplicate went to the Recycle Bin); delete response carries updated counts (groups=0, photos=2); the deleted group is gone from `/scan/results`; deleting it again removes 0; **a clean rescan reports 0 skipped**. **20 PASS lines, then `SMOKE TEST PASSED`** (17 before 2026-10-05). Exits non-zero on failure. Puts one temp image in the Recycle Bin per run (expected).
+- `backend/tests/test_skipped_files.py` (run: `backend\venv\Scripts\python.exe -m unittest discover -s backend\tests -v`; no backend needed): locked → "open in another program"; access denied → "Windows denied access"; vanished during discovery → "no longer there (moved or deleted)"; clean scan → nothing skipped; list sorted by path; `/scan/progress` lists at most 20 but counts all 25; a locked file on delete gets the plain reason and its group stays. Unreadable files are simulated by patching `open()` / `os.path.getsize` and `_windows_open_error`. **7 tests, OK.** Not yet run by `build-backend.ps1`.
+- `build-backend.ps1`: see 4.8; success line `BUILD OK: ...prism-backend-x86_64-pc-windows-msvc.exe (21.1 MB)`; it runs the smoke test (now 20 checks) against the frozen exe.
 - `scan-responsiveness.ps1 -Folder <path>`: starts a scan, polls `/health` and `/scan/progress` every 250 ms, prints a status line every 5 s, and passes only if the scan completed, the hashing counter never went backwards, max `/health` time was under 1000 ms, and the `hashing` phase was seen. **It only scans; it never deletes.**
 
 **Test folders.** `C:\prism_test` (generator in CLAUDE.md; 100 unique images plus 100 exact copies; random noise PNGs about 264 to 270 KB each, comfortably above the 10 KB minimum). `C:\prism_perf` (1,100 files: 1,000 unique plus 100 copies, about 300 MB, deleted afterwards). Real data **never to be modified**: `D:\` (24,263 photos on a USB HDD) and the earlier 24,321-file library.
 
-**Locked-file test (still to be finished).** Order: (1) generate the folder, scan it in Prism (100 groups); (2) in a separate **normal PowerShell** (not ISE) run:
+**Locked-file test.** Done through the API on 2026-10-05 (21/21, see 6.5); the owner still runs it once in the dev app to see the banner. Order: (1) generate the folder, scan it in Prism (100 groups); (2) in a separate **normal PowerShell** (not ISE) run:
 ```powershell
 $fs = [System.IO.File]::Open('C:\prism_test\img005 - Copy.png', 'Open', 'Read', 'None')
 try { "Locked. Delete in Prism now. Press Enter here to release the file."; $null = Read-Host } finally { $fs.Close(); "Released." }
@@ -331,8 +363,8 @@ try { "Locked. Delete in Prism now. Press Enter here to release the file."; $nul
 ## 10. Known issues and observations
 
 Confirmed by testing:
-1. **Stale summary card** (`ScanProgress.tsx`): says "Scan Complete", shows the Scan ID, says "No duplicates found in this folder. All N photos are unique." after a cleanup, and "You can review and delete duplicates in the next step"; takes the whole first screen on a small window; every page change scrolls to the top of the page onto it.
-2. **Unreadable (e.g. locked) files are silently skipped** by the scanner; a scan can report 199 of 200 photos with no explanation, and the partner of a skipped duplicate is not listed. The skip is correct (never delete what you could not read); the silence is the problem. Likely also happens for files being synced by OneDrive or still downloading.
+1. **[FIXED in `eed8354`, replaced by `ResultsSummary`] Stale summary card** (`ScanProgress.tsx`): says "Scan Complete", shows the Scan ID, says "No duplicates found in this folder. All N photos are unique." after a cleanup, and "You can review and delete duplicates in the next step"; takes the whole first screen on a small window; every page change scrolls to the top of the page onto it.
+2. **[FIXED in `098df1e` + `eed8354`: now reported with a reason in the results notice] Unreadable (e.g. locked) files are silently skipped** by the scanner; a scan can report 199 of 200 photos with no explanation, and the partner of a skipped duplicate is not listed. The skip is correct (never delete what you could not read); the silence is the problem. Likely also happens for files being synced by OneDrive or still downloading.
 3. **Hashing is slow on spinning/USB disks** (about 9 to 10 files/s): 4 KB read chunks and 4 concurrent threads suit SSDs but make a spinning disk seek constantly. Candidate fixes: 1 MB chunks, fewer threads when the folder is on an HDD/USB drive. Measure before and after on `D:\`; do not guess.
 4. **No way to cancel a running scan** (a 40-minute scan started by mistake can only be stopped by closing the app). Needs a cancel flag checked by the worker.
 5. **HEIC and RAW are not scanned** (the scanner's own extension set omits them although `Config.IMAGE_EXTENSIONS` lists them) and **files under 10 KB are skipped silently**; relevant for phone libraries.
@@ -352,8 +384,8 @@ From reading the code (not tested; treat as hypotheses):
 ## 11. Backlog and roadmap
 
 **Immediate (Checkpoint 6 wrap-up)**
-1. Summary strip + status line replacing the stale card; scroll to the groups list on page change; skipped-files report (scanner records name + reason per skipped file; `/scan/progress` returns `skipped_count` and the first few names; results screen shows a note such as "1 file couldn't be read and was skipped. It may be open in another program. Close it and scan again."). Owner had not yet approved; recommend as the first task.
-2. Finish the locked-file delete test, rebuild exe and MSI (non-elevated terminal, exe first), install, verify the installed app (pagination, stay-on-results, banner, clean shutdown), merge to `main` with `--no-ff` (`Checkpoint 6: ...`), tag `v0.1.2-cp6`, push.
+1. ✔ Summary strip + status line + skipped-files notice; pager scrolls to the list (done 2026-10-05: `098df1e`, `eed8354`, `5c4611d`).
+2. Owner tests in `tauri dev` (native dialog, locked-file scan notice, locked-file delete failure), then rebuild exe and MSI (non-elevated terminal, exe first), install, verify the installed app (pagination, stay-on-results, banner, clean shutdown), merge to `main` with `--no-ff` (`Checkpoint 6: ...`), tag `v0.1.2-cp6`, push.
 
 **Owner's roadmap, in his chosen order**
 2. Pagination ✔ (in CP6)
@@ -364,6 +396,8 @@ From reading the code (not tested; treat as hypotheses):
 **Additional backlog (unordered)**: Cancel Scan; faster hashing on slow disks; Vite ignores `src-tauri`; delete dead files and rewrite `requirements.txt`; CORS hardening; HEIC/RAW support and a clearer message about tiny files; thumbnails allow-list as a set maintained per session; dict lookups in `/scan/results`; session cleanup; clean-machine (no Python) install test; NSIS bundling (needs a reliable download); licensing/tiers (Free/Pro/Business) when the product is ready; AI Pack via ONNX Runtime (v0.3+).
 
 ## 12. Open verification items (do these first in a new session)
+
+**Status 2026-10-05 (see 6.5):** items 1 to 4 done and passed; item 5 done (built); item 6 blocked on this machine (Windows 11 Home: no Sandbox/Hyper-V). Still open: the owner's `tauri dev` check of the native dialog and the two locked-file screens, and item 6 on another PC or a VirtualBox VM. The list below is kept as written for reference; checks that mention 17 now have 20.
 
 1. `git status`, `git branch --show-current` (expect `checkpoint-6-pagination`), `git log --oneline -8`. Confirm the instructed commits exist (paginate, delete-in-place `b6dc3c3`, smoke-test 17 checks, stay-on-results banner). The owner restarted his PC at the end of the chat, so nothing should be lost, but confirm.
 2. `git ls-files | Select-String tsbuildinfo` should print nothing and `.gitignore` should contain `*.tsbuildinfo` (CP5 housekeeping was instructed, not shown).
@@ -379,6 +413,9 @@ From reading the code (not tested; treat as hypotheses):
 - Results header: "📸 Prism", "See your photos clearly • Remove duplicates with confidence", button "← Back to Folder Selection".
 - Grid: "Duplicate Groups"; "N groups found. Showing A to B."; "Select groups to delete" / "N groups selected for deletion (X MB)"; "☐ Select this page" / "✓ Deselect this page"; "Select all N groups"; "Clear selection"; "Page X of Y"; group labels "✓ Exact Match" / "≈ Visual Match", "N% confidence", "N duplicates • X MB"; card tags "KEPT" and "DELETE".
 - Delete bar: "Delete Summary"; "You're about to delete N groups of duplicates (X MB), including K on other pages. This action moves files to Recycle Bin and can be undone."; button "Delete N Groups" / "Deleting...".
+- Results summary (since `eed8354`): "<folder>" · "N photos · N duplicate groups · N extra copies (X MB)"; status "Prism keeps one photo from each group (marked KEPT) and moves the extra copies to the Recycle Bin. Select the groups you want to clean up." / "N groups left to review."; skipped notice "N photos couldn't be read and were skipped, so they aren't in these results." + "Close the program that's using them, then scan again." / "See why below, then scan again.", "Show files", "<file>: <reason>", "...and N more".
+- Skip/failure reasons: "open in another program", "Windows denied access", "no longer there (moved or deleted)", "could not be read (<Error>)" / "could not be moved (<Error>)".
+- Folder picker tip (since `eed8354`): "Tip: Prism scans this folder and all its subfolders and finds exact copies of your photos. Nothing is changed until you choose what to delete." (It used to promise "visual duplicates (AI-detected similar)".)
 - Banners: see 4.6. Empty: "No duplicates found! Your photos are all unique." / "All duplicates cleared. Nice and tidy!" and "Scan Another Folder".
 - Errors: "Scan failed", "Deletion failed" fallbacks; the error screen has a "Try Again" button that returns to the folder picker.
 

@@ -2,7 +2,7 @@
 
 > This file is loaded every session, so it is deliberately short. The full story (history, every decision and its reasoning, incidents, measurements, API contract, backlog) is in `docs/PROJECT_HISTORY.md`.
 > **At the start of your first session on this project, read `docs/PROJECT_HISTORY.md` completely**, then work through section 12 of it ("Open verification items"). Afterwards, read it again only when you need background. Do not `@import` it (imports load into context every session and save nothing).
-> Last updated: 2026-10-05, at the end of a long claude.ai chat that covered Checkpoints 4, 5 and most of 6.
+> Last updated: 2026-10-05, in the first Claude Code session (after a long claude.ai chat that covered Checkpoints 4, 5 and most of 6).
 
 ## 1. What Prism is
 
@@ -33,14 +33,15 @@ C:\projects\PRISM
   backend\app\main.py              FastAPI app, scan worker thread, all routes, __main__ (argparse --port --parent-pid)
   backend\app\config.py            Config (data dir from PRISM_DATA_DIR, dev fallback ~/.prism)
   backend\app\models\scan.py       dataclasses: PhotoRecord, DuplicateGroup, ScanSession
-  backend\app\services\services.py FolderScanner, ScanProgress, Deduper (MD5), SafeDeleter
+  backend\app\services\services.py FolderScanner (records skipped_files), ScanProgress, Deduper (MD5), SafeDeleter, describe_file_error
+  backend\tests\test_skipped_files.py  unittest (stdlib): skipped-file reasons, progress cap, delete failure reason
   backend\app\services\deduper.py, services\main.py   DEAD files (old CLIP code / old server copy), safe to delete
   backend\requirements-release.txt pinned runtime deps for the frozen backend (source of truth for releases)
   backend\requirements.txt         STALE, do not trust
   backend\venv                     dev venv (has torch etc., Python 3.14.5)
   backend\venv-release             release venv (git-ignored, created by the build script)
   src\App.tsx                      state machine: starting / folder-select / scanning / results / error
-  src\components\                  FolderSelector, ScanningView (live progress), ScanProgress (results summary card), ResultsGrid
+  src\components\                  FolderSelector, ScanningView (live progress), ResultsSummary (one-line strip, status line, skipped-files notice; replaced ScanProgress.tsx), ResultsGrid
   src\services\api.ts              ApiService: dynamic base URL, waitForBackend, polling, thumbnailUrl
   src\types.ts
   src-tauri\src\lib.rs             spawns and kills the sidecar, backend_port command
@@ -48,6 +49,7 @@ C:\projects\PRISM
   src-tauri\binaries\              built sidecar exe (git-ignored)
   scripts\build-backend.ps1, smoke-test.ps1, scan-responsiveness.ps1
   docs\PROJECT_HISTORY.md          full history and reference
+  .claude\launch.json              Claude browser-pane dev servers: "frontend" (landing page, :3000), "desktop-ui" (this app's Vite, :5173); machine-specific paths
 ```
 
 ## 5. Commands
@@ -64,7 +66,8 @@ npm run tauri dev
 
 # Checks
 npx tsc --noEmit
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-test.ps1            # needs a backend on :8000, 19 checks
+backend\venv\Scripts\python.exe -m unittest discover -s backend\tests -v               # no backend needed, 7 tests
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\smoke-test.ps1            # needs a backend on :8000, 20 checks
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\scan-responsiveness.ps1 -Folder <folder>   # scan only, never deletes
 
 # Release (ORDER MATTERS: backend first, then the MSI)
@@ -88,6 +91,7 @@ $mk = "import os, sys, shutil; from PIL import Image; d = sys.argv[1]; [(Image.f
 - The scan runs in a **background thread**; `/scan/start` returns immediately. A session's `status` becomes `completed` only after hashing **and** grouping finish. `/scan/results` and `/scan/delete` return 409 until then.
 - `/scan/delete` is a **plain `def`** (runs in a worker thread). Do not put long work in `async def` handlers; it blocks `/health` and everything else.
 - Keeper choice must be **deterministic**: shortest filename, then oldest creation time, then lowercased path.
+- A file the scanner cannot read is **skipped and reported, never silently dropped** (`session.skipped_files`, shown in the results notice). Reasons shown to users come from `describe_file_error` (plain language); raw errors go to the log only.
 - Release backend dependencies are **pinned** in `requirements-release.txt`. Anything the backend imports must be in it (the build script has an import gate that catches omissions).
 - Backend binds `127.0.0.1` only. In release the port is random and passed by Tauri; the frontend asks Rust via the `backend_port` command. Never hard-code `8000` outside the dev default in `api.ts`.
 - Tauri v2 quirks: the dialog plugin needs `tauri_plugin_dialog::init()` in `lib.rs`, `dialog:allow-open` in `capabilities/default.json`, and an EMPTY `plugins` block in `tauri.conf.json`. `fs:*` and `http:*` permissions do not exist in v2. `capabilities` is not valid inside `app.windows[]`. `[lib] name = "app_lib"` stays because `main.rs` calls `app_lib::run()`.
@@ -109,11 +113,11 @@ $mk = "import os, sys, shutil; from PIL import Image; d = sys.argv[1]; [(Image.f
 ## 8. Current state (2026-10-05)
 
 - `main` is at the Checkpoint 5 merge `902187a` (tag `v0.1.1-cp5`). Installed-app testing of everything up to there passed.
-- Branch **`checkpoint-6-pagination`** (not merged) holds: paginated results (20 per page, select page / select all / clear), in-place delete (backend recomputes the scan, reports failed files), and a results screen that **stays open after a delete** with a green/amber/red banner. Tested in the dev app (screenshots confirmed); **not yet built into an MSI, not merged, not tagged.**
-- Some commits on that branch were instructed to the owner but not confirmed. Run `git status` and `git log --oneline -8` first.
+- Branch **`checkpoint-6-pagination`** (not merged, not pushed) holds: paginated results (20 per page, select page / select all / clear), in-place delete (backend recomputes the scan, reports failed files), a results screen that **stays open after a delete** with a green/amber/red banner, and (2026-10-05) the **summary strip + skipped-files notice** with plain-language reasons. All commits are confirmed; see `docs/PROJECT_HISTORY.md` section 5. Verified with unit tests, the 20-check smoke test and a browser-pane run of the UI; **not yet tested by the owner in `tauri dev`, not built into an MSI, not merged, not tagged.**
+- Start each session with `git status` and `git log --oneline -10`.
 
 ## 9. Next tasks (in order; confirm the first with the owner)
 
-1. **Summary strip + skipped-files notice** (proposed, owner had not yet said yes): replace the stale tall "Scan Complete" card (shows "No duplicates found" right after a cleanup, shows a Scan ID, pushes the groups off screen) with a one-line counts strip and an adaptive status line; make page changes scroll to the groups list; report files the scanner could not read (locked files are silently skipped today, so a scan can show 199 of 200 photos with no explanation).
-2. Finish the locked-file delete test (see history, section 12), rebuild exe and MSI, install, verify, merge `checkpoint-6-pagination` to `main`, tag `v0.1.2-cp6`.
+1. Owner tests in `tauri dev`: the native folder dialog, the locked-file scan notice, the locked-file delete failure.
+2. Then (owner has approved): build the backend exe, then the MSI, from a normal terminal; owner installs and verifies; ask before merging `checkpoint-6-pagination` to `main` (`--no-ff`, `Checkpoint 6: ...`), tagging `v0.1.2-cp6` and pushing.
 3. Backlog in the owner's chosen order: `/thumbnail` validation against SQLite (survive backend restarts) → perceptual-hash near-duplicates (v0.2, wait for user feedback first) → code signing. Plus: Cancel Scan button, faster hashing on spinning/USB disks, make Vite ignore `src-tauri`, delete the dead files, CORS hardening, HEIC/RAW support. Details in `docs/PROJECT_HISTORY.md` section 11.
