@@ -14,9 +14,11 @@ function Get-HttpStatus([scriptblock]$call) {
 
 $dir = Join-Path $env:TEMP ('prism_smoke_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Force -Path $dir | Out-Null
-$mk = "import os, sys; from PIL import Image; d = sys.argv[1]; [Image.frombytes('RGB', (128, 128), os.urandom(128*128*3)).save(os.path.join(d, n)) for n in ('a.png', 'c.png')]"
+$mk = "import os, sys; from PIL import Image; d = sys.argv[1]; [Image.frombytes('RGB', (128, 128), os.urandom(128*128*3)).save(os.path.join(d, n)) for n in ('a.png', 'c.png', 'd.png')]"
 & $PythonExe -c $mk $dir
 Copy-Item (Join-Path $dir 'a.png') (Join-Path $dir 'b.png')
+$lockedPath = Join-Path $dir 'd.png'
+$lock = $null
 
 try {
     $health = Invoke-RestMethod "$BaseUrl/health" -TimeoutSec 5 -ErrorAction Stop
@@ -32,6 +34,9 @@ try {
     $code = Get-HttpStatus { Invoke-RestMethod "$BaseUrl/scan/progress?scan_id=does-not-exist" -TimeoutSec 10 -ErrorAction Stop }
     Check ($code -eq 404) "unknown scan id returns 404 (got $code)"
 
+    # d.png is held open with no sharing for the whole scan, so the scanner cannot read it
+    $lock = [System.IO.File]::Open($lockedPath, 'Open', 'Read', 'None')
+
     $body = @{ folder_path = $dir } | ConvertTo-Json
     $start = Invoke-RestMethod "$BaseUrl/scan/start" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10 -ErrorAction Stop
     Check (($start.status -eq 'started') -and $start.scan_id) '/scan/start returns "started" and a scan_id immediately'
@@ -42,8 +47,14 @@ try {
         $prog = Invoke-RestMethod "$BaseUrl/scan/progress?scan_id=$($start.scan_id)" -TimeoutSec 10 -ErrorAction Stop
     } while ($prog.status -eq 'in_progress' -and (Get-Date) -lt $deadline)
 
+    $lock.Close(); $lock = $null
+    Remove-Item $lockedPath -Force   # keep the folder at a, b, c for the delete checks below
+
     Check (($prog.status -eq 'completed') -and ($prog.phase -eq 'completed')) "scan completes (status=$($prog.status), phase=$($prog.phase))"
     Check ($prog.total_photos -eq 3) "scan found 3 photos (got $($prog.total_photos))"
+    Check ($prog.skipped_count -eq 1) "1 unreadable file reported as skipped (got $($prog.skipped_count))"
+    $skip = @($prog.skipped)[0]
+    Check (($skip.file -eq 'd.png') -and ($skip.reason -eq 'open in another program')) "skipped file is d.png, reason 'open in another program' (got '$($skip.file)', '$($skip.reason)')"
     Check ($prog.exact_duplicates -eq 1) "1 exact duplicate (got $($prog.exact_duplicates))"
     Check ($prog.visual_duplicates -eq 0) "0 visual duplicates (got $($prog.visual_duplicates))"
     Check ($prog.duplicate_groups -eq 1) "1 duplicate group (got $($prog.duplicate_groups))"
@@ -72,6 +83,7 @@ catch {
     $script:failed = $true
 }
 finally {
+    if ($lock) { $lock.Close() }
     Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
 }
 

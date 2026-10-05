@@ -53,5 +53,6 @@ class ScanSession:
     phase: str = "queued"  # "queued", "discovering", "hashing", "grouping", "completed", "failed"
     files_processed: int = 0
     files_total: int = 0
+    skipped_files: list[dict] = field(default_factory=list)  # [{file, path, reason}] the scanner could not read
     photos: list[PhotoRecord] = field(default_factory=list)
     duplicate_groups: list[DuplicateGroup] = field(default_factory=list)

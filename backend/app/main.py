@@ -164,6 +164,8 @@ async def get_progress(scan_id: str):
         "exact_duplicates": session.exact_duplicates,
         "visual_duplicates": session.visual_duplicates,
         "duplicate_groups": len(session.duplicate_groups),
+        "skipped_count": len(session.skipped_files),
+        "skipped": session.skipped_files[:20],
         "error_message": session.error_message
     }
 

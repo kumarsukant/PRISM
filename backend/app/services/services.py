@@ -1,15 +1,57 @@
 """
 PRISM Backend - Core Services for photo scanning and deduplication
 """
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Tuple
 from dataclasses import dataclass
 from models.scan import ScanSession, PhotoRecord, DuplicateGroup
 from config import Config
 import hashlib
 import os
+import sys
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image
+
+def _windows_open_error(file_path: str) -> Optional[int]:
+    """Ask Windows why a file cannot be opened: 32 = in use, 5 = access denied, 0 = it opens now.
+
+    Python's open() turns both "in use" and "access denied" into the same PermissionError without
+    the Windows code, so this tells them apart. Only called on the failure path.
+    """
+    if sys.platform != "win32":
+        return None
+    import ctypes
+    from ctypes import wintypes
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    k32.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                                wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
+    # GENERIC_READ, share read/write/delete, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL
+    handle = k32.CreateFileW(file_path, 0x80000000, 0x7, None, 3, 0x80, None)
+    if handle == wintypes.HANDLE(-1).value:
+        return ctypes.get_last_error()
+    k32.CloseHandle(handle)
+    return 0
+
+
+def describe_file_error(error: BaseException, action: str, file_path: Optional[str] = None) -> str:
+    """A short, plain-language reason a file could not be read or moved, for showing to the user.
+
+    `action` is the past participle used in the fallback ("read" or "moved"). The raw error still
+    goes to the log, where it is useful; users get a reason they can act on.
+    """
+    winerror = getattr(error, "winerror", None)
+    if winerror is None and isinstance(error, PermissionError) and file_path:
+        winerror = _windows_open_error(file_path)
+    if winerror in (32, 33):  # sharing violation / lock violation
+        return "open in another program"
+    if isinstance(error, FileNotFoundError) or winerror in (2, 3):
+        return "no longer there (moved or deleted)"
+    if isinstance(error, PermissionError) or winerror == 5:
+        return "Windows denied access"
+    return f"could not be {action} ({type(error).__name__})"
+
 
 @dataclass
 class ScanProgress:
@@ -34,11 +76,17 @@ class FolderScanner:
             
             # Find all image files
             image_files = []
+            skipped = []  # files we could not read: never silently dropped, the user is told
             for root, dirs, files in os.walk(folder_path):
                 for file in files:
                     if Path(file).suffix.lower() in self.IMAGE_EXTENSIONS:
                         file_path = os.path.join(root, file)
-                        file_size = os.path.getsize(file_path)
+                        try:
+                            file_size = os.path.getsize(file_path)
+                        except OSError as e:
+                            print(f"Skipping {file_path}: {e}")
+                            skipped.append(self._skip(file_path, describe_file_error(e, "read", file_path)))
+                            continue
                         if file_size >= self.MIN_FILE_SIZE:
                             image_files.append(file_path)
                             if progress_callback and len(image_files) % 200 == 0:
@@ -63,10 +111,12 @@ class FolderScanner:
                 
                 for idx, future in enumerate(as_completed(futures), 1):
                     try:
-                        photo = future.result()
+                        photo, reason = future.result()
                         if photo:
                             photos.append(photo)
-                        
+                        else:
+                            skipped.append(self._skip(futures[future], reason))
+
                         if progress_callback:
                             progress_callback(ScanProgress(
                                 files_processed=idx,
@@ -74,10 +124,12 @@ class FolderScanner:
                             ))
                     except Exception as e:
                         print(f"Error processing file {futures[future]}: {e}")
-            
+                        skipped.append(self._skip(futures[future], f"could not be read ({type(e).__name__})"))
+
             session.photos = photos
             session.total_photos = len(photos)
-            print(f"Scan complete: {len(photos)} valid images")
+            session.skipped_files = sorted(skipped, key=lambda s: s["path"].lower())
+            print(f"Scan complete: {len(photos)} valid images, {len(skipped)} skipped")
             return session
             
         except Exception as e:
@@ -86,8 +138,12 @@ class FolderScanner:
             session.error_message = str(e)
             return session
     
-    def _process_image(self, file_path: str) -> Optional[PhotoRecord]:
-        """Process a single image file"""
+    @staticmethod
+    def _skip(file_path: str, reason: str) -> dict:
+        return {"file": os.path.basename(file_path), "path": file_path, "reason": reason}
+
+    def _process_image(self, file_path: str) -> Tuple[Optional[PhotoRecord], Optional[str]]:
+        """Process a single image file. Returns (photo, None), or (None, reason) if it could not be read."""
         try:
             # Compute MD5 hash
             md5_hash = hashlib.md5()
@@ -115,11 +171,11 @@ class FolderScanner:
                 height_px=height,
                 color_space=color_space
             )
-            return photo
-            
+            return photo, None
+
         except Exception as e:
             print(f"Error processing {file_path}: {e}")
-            return None
+            return None, describe_file_error(e, "read", file_path)
 
 class Deduper:
     """Finds duplicate photos. v0.1: exact matches by MD5. Near-duplicates (perceptual hash) arrive in v0.2."""
@@ -246,4 +302,4 @@ class SafeDeleter:
             return None
         except Exception as e:
             print(f"Could not move {file_path} to Recycle Bin: {e}")
-            return (str(e) or type(e).__name__)[:200]
+            return describe_file_error(e, "moved", file_path)
