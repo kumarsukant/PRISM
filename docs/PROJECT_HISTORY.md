@@ -143,17 +143,20 @@ React UI (WebView2)  --HTTP-->  FastAPI on 127.0.0.1:<port>  --->  Pillow / hash
 |---|---|
 | `GET /health` | `{status:"ok", message:"PRISM backend is running", version:"0.1.0"}` |
 | `POST /scan/start` body `{folder_path}` | 400 if missing or not an existing directory; otherwise registers the session immediately, starts the worker thread, returns `{status:"started", scan_id}` |
-| `GET /scan/progress?scan_id=` | 404 unknown id; else `{status, phase, scan_id, files_processed, files_total, total_photos, exact_duplicates, visual_duplicates, duplicate_groups, skipped_count, skipped, error_message}`. `skipped` is the first **20** `{file, path, reason}` entries (capped, like delete `failed`); `skipped_count` is the full total (both added in `098df1e`). `status` in_progress/completed/failed/cancelled; `phase` queued/discovering/hashing/grouping/completed/failed |
+| `GET /scan/progress?scan_id=` | 404 unknown id; else `{status, phase, scan_id, files_processed, files_total, total_photos, exact_duplicates, visual_duplicates, duplicate_groups, skipped_count, skipped, error_message}`. `skipped` is the first **20** `{file, path, reason}` entries (capped, like delete `failed`); `skipped_count` is the full total (both added in `098df1e`). `status` in_progress/completed/failed/cancelled; `phase` queued/discovering/hashing/grouping/completed/failed. Since CP9 also `coverage: {photos_checked, folders_checked, heic_not_checked, raw_not_checked, under_10kb, online_only, unreadable}` |
+| `GET /scan/insights?scan_id=` | (CP9) plain `def`. 404 unknown; 409 not complete; else, computed on demand from the session (so it follows deletes): `{status, scan_id, root, root_name, headlines:[top_folder / split], totals:{photos, folders, folders_with_duplicates, duplicate_groups, groups_in_one_folder, groups_across_folders, groups_across_3_plus_folders, extra_copies, extra_bytes}, folders (top 10):[{id, path, relative_path, photos, photos_with_duplicate, share_with_duplicate, extra_copies, extra_bytes, inside_share, tag}], folders_with_duplicates_not_shown, pairs (top 5):[{a:{id, relative_path}, b, shared_groups}], tips (0-4):[{id, ...numbers}], coverage}`. Definitions in 6.7 and in `services/insights.py` |
+| `GET /scan/folder?scan_id=&folder_id=` | (CP9) plain `def`. 404 unknown scan or a folder id that holds no photo of that scan; 409 not complete; else `{status:"ok", path}`. Used only by the app's Rust `open_scan_folder` |
+| All routes (CP9) | `Host` must be `127.0.0.1` or `localhost` (any port), else 400. A request with an `Origin` other than `http(s)://tauri.localhost`, `tauri://localhost`, `http(s)://localhost[:port]`, `http(s)://127.0.0.1[:port]` gets 403 (logged once per origin to backend.log); CORS allows only those origins, methods GET/POST, header Content-Type, no credentials. Requests without `Origin` (img thumbnails, Rust, scripts) are unaffected |
 | `GET /scan/results?scan_id=` | 404 unknown; **409** until `status == "completed"`; else `{status:"complete", scan_id, total_photos, duplicate_groups, groups:[{id, type, confidence, kept_photo_id, photos:[{id, file_path, file_size_bytes, width, height, is_kept}]}]}` |
 | `POST /scan/delete` body `{scan_id, group_ids}` | plain `def` (thread pool). 400 no scan_id; 404 unknown; 409 not complete; else `{status:"success"|"partial", scan_id, files_deleted, storage_freed_mb, groups_resolved, failed (first 20), failed_count, total_photos, exact_duplicates, visual_duplicates, duplicate_groups, message}`. Each `failed` entry is `{file, reason}`; since `098df1e` the reason is plain language from `describe_file_error` (e.g. `"open in another program"`), not the raw `[WinError 32] ... C:\PRISM_~1\...` text |
-| `GET /thumbnail?path=` | 403 if the path is not a photo in any scan (the allow-list is rebuilt by iterating every photo of every session **on every request**); 404 missing file; 500 on failure; else JPEG. 300 px thumbnail, quality 80, `img.draft("RGB",(600,600))`, cached at `%TEMP%\prism_thumbs\<md5 of normcased path>.jpg` |
+| `GET /thumbnail?path=` | 403 if the path is not a photo in any scan (the allow-list is rebuilt by iterating every photo of every session **on every request**); 404 missing file; 409 if the file has become online-only (never opened, CP9); 500 on failure; else JPEG. 300 px thumbnail, quality 80, `img.draft("RGB",(600,600))`, cached at `%TEMP%\prism_thumbs\<md5 of normcased path>.jpg` |
 | `GET /stats` | `{completed_scans, total_scans_processed, db_path}` (the CLIP fields were removed) |
 
 ### 4.5 Data models (`models/scan.py`, dataclasses)
 
 - `PhotoRecord`: `id` (uuid4 str), `file_path`, `file_size_bytes`, `file_hash_md5`, `file_hash_sha256` (unused), `visual_embedding` (unused, for CLIP), `width_px`, `height_px`, `color_space`, `file_format` (unused), `created_date`, `modified_date` (unused), `indexed_at`.
 - `DuplicateGroup`: `id`, `group_type` ("exact" or "visual"), `confidence_score`, `photo_ids`, `kept_photo_id`, `created_at`, `user_reviewed`, `user_action`, `deleted_at` (the last three are unused).
-- `ScanSession`: `id`, `folder_path`, `started_at`, `completed_at` (never set), `total_photos`, `exact_duplicates`, `visual_duplicates`, `files_deleted`, `storage_freed_mb`, `status`, `error_message`, **`phase`, `files_processed`, `files_total`** (added in CP5), **`skipped_files`** (list of `{file, path, reason}`, added in `098df1e`), `photos`, `duplicate_groups`.
+- `ScanSession`: `id`, `folder_path`, `started_at`, `completed_at` (never set), `total_photos`, `exact_duplicates`, `visual_duplicates`, `files_deleted`, `storage_freed_mb`, `status`, `error_message`, **`phase`, `files_processed`, `files_total`** (added in CP5), **`skipped_files`** (list of `{file, path, reason}`, added in `098df1e`), **`coverage`** (dict `{heic, raw, under_10kb, online_only, photos_checked, folders_checked}`, CP9), `photos`, `duplicate_groups`.
 
 ### 4.6 Frontend behaviour
 
@@ -244,6 +247,18 @@ Merges (2026-10-05, after the owner's 11-step installed-app test passed):
 - **`8faacf8 Checkpoint 7: dark mode follows Windows, polish`**, tag **`v0.1.3-cp7`**.
 - **CP6 was tested inside the CP7 installer.** No separate CP6 exe or MSI was built: the one installer was built from `checkpoint-7-dark-mode` @ `e4151b2`, which contains every CP6 commit, and `main`'s tree after the CP7 merge is identical to it (`git diff e4151b2 8faacf8` is empty). The tag `v0.1.2-cp6` marks the code, not a separately tested installer.
 - Followed on `main` by the commit that adds this update to the docs (`docs: ...`; see `git log`).
+
+**Checkpoint 8, branch `checkpoint-8-version-bump`** (from `main` `3e9f885`; not merged): app version 0.1.0 → 0.2.0 → 0.1.4 and the "Releasing" section; see that branch's docs.
+
+**Checkpoint 9, branch `checkpoint-9-insights`** (from `main` `3e9f885`; not merged, not pushed; see 6.7):
+1. `baaff97 docs: backlog the Reorganizer as a later, not-started item`
+2. `54de0fa feat: scan .tif files (only .tiff was recognised; .tif photos were silently ignored)`
+3. `37d9f05 feat: scan insights endpoint, coverage counters, never open online-only (cloud) files`
+4. `0885fad test: insights definitions, thresholds, tips, recompute after delete, 25k-photo timing, online-only never opened`
+5. `5c087da test: nested insights test tree generator; smoke test checks /scan/insights and /scan/folder (20 -> 30 checks)`
+6. `e27a001 feat: Insights and Review duplicates tabs; Insights panel with headline, folders, pairs, tips and coverage`
+7. `fb83fcd feat: Open folder via the app's Rust side; backend accepts only the app's origins and loopback Host names`
+8. the commit that adds this update to the docs (`docs: ...`; see `git log`)
 
 ## 6. Chronology: what happened, in order
 
@@ -340,6 +355,74 @@ The owner noticed that the copy-paste loop (assistant writes a patch script, own
 - *Testing lessons from this checkpoint:* Vite served a stale `api.ts` (the watcher missed the second of two quick saves), giving `errorMessage is not defined` even after a reload; fixed by restarting the dev server, and diagnosed by fetching the served module. The browser pane re-syncs its colour-scheme emulation to the app theme, so a "light" reading once came back with dark colours: check `matchMedia('(prefers-color-scheme: dark)')` in the same call as every measurement. With the pane hidden, screenshots go stale and CSS transitions freeze mid-way (a selected card read as the dark tint until its transition was finished).
 - *Not verified (owner will):* the native window and Windows title bar in both themes; anything in the installed MSI.
 - *Release (2026-10-05).* The owner passed the native dark-mode checks; on Claude's recommendation one installer was built from `checkpoint-7-dark-mode` @ `e4151b2` instead of a CP6-only one first: `build-backend.ps1` BUILD OK (21.1 MB; stage 2 ran 7 unit tests OK; the frozen exe passed 20/20 smoke checks), then `npm run tauri build` (MSI 24.65 MiB, 96 s newer than the exe, bundled backend byte-identical to the sidecar, no High Mandatory label). The owner uninstalled the old PRISM, installed the MSI and passed an 11-step installed-app test. Then CP6 and CP7 were merged to `main` in that order (`2de3458`, `8faacf8`) and tagged `v0.1.2-cp6` / `v0.1.3-cp7`; CP6 was therefore tested inside the CP7 installer (see 5). The app still reports version 0.1.0 (backlog: bump the version per release).
+
+### 6.7 Checkpoint 9: scan insights (2026-10-05)
+
+- *Goal (owner).* After a scan, show where the duplicates are, so users understand what to be careful about. Read-only. **Scope guard:** no reorganize feature of any kind (no button, not even disabled; no wizard; no endpoint that moves, renames or deletes; no tip telling the user to reorganize). The only action is Open folder. The Reorganizer went to the backlog as a later, not-started item (section 11).
+- *Process.* Step 1 was a design only (endpoint JSON, definitions, coverage counters, an 800x600 mockup in both themes, how Open folder stays safe, CORS); the owner approved it with changes: online-only protection, 1-2 headline sentences, tag names "Copies in same folder" / "Copies in other folders" / "Mixed", pin only the header and delete bar, a CORS origin pattern with logging, a Host check, Rust loopback timeouts and tests, notices above the tabs, separate " - Copy" and "(1)" tips hedged with "often", and extra tests (drive root, 25k photos, `.tif`, tab accessibility).
+- *Definitions (also in `services/insights.py`).*
+  - **Folder:** the directory directly containing the photo, matched by `normcase(normpath())`. A drive-root scan shows its own name as "D:", and the scanned folder itself shows as "<name> (top level)".
+  - **Photos with a duplicate:** members of duplicate groups, whichever copy is kept.
+  - **Extra copies:** members that are not the kept photo.
+  - **Inside share:** memberships in groups entirely inside that folder. Tagged `same_folder` at ≥ 0.70, `other_folders` at ≤ 0.30, otherwise `mixed`.
+  - **Pairs:** +1 per group for every unordered pair of distinct folders it spans. A group spanning 3+ folders counts in each of its pairs and once in `groups_across_3_plus_folders`, so pair counts are never summed.
+  - **Display limits:** top 10 folders, top 5 pairs, at most 4 tips.
+- *Tips (shown only when the numbers clear a bar).* All wording is in `InsightsPanel.tsx`; every cause is hedged with "often".
+  - **`copy_suffix`:** " - Copy" names (incl. "Copy of"), at least 5 **and** at least 20% of extra copies.
+  - **`number_suffix`:** " (1)" names, same thresholds.
+  - **`folder_pair`:** the top pair shares at least 10 groups and at least 25% of the smaller folder's photos.
+  - **`same_folder`:** a folder with at least 10 photos with a duplicate, tagged same_folder.
+  - **`spread`:** at least 5 groups spanning 3+ folders.
+- *Coverage.* The scanner now walks with `os.scandir`, so each file's size and Windows attributes come from the folder listing itself. That means no extra disk access, and one `getsize` call per image fewer than before. It counts:
+  - HEIC/HEIF;
+  - RAW (`.cr2 .cr3 .nef .arw .dng .orf .rw2 .raf .srw .pef .raw`);
+  - supported images under 10 KB;
+  - online-only files.
+
+  Unreadable files are the existing `skipped_files`. The coverage line also says "Checked N photos in M folders" (as of the scan).
+- *Online-only (cloud) files* (owner's requirement).
+  - **Detection:** attributes only, never by reading the file: RECALL_ON_DATA_ACCESS 0x400000, RECALL_ON_OPEN 0x40000, OFFLINE 0x1000. PINNED / UNPINNED alone are not online-only.
+  - **Where it is checked:** in the listing, again with `GetFileAttributesW` just before hashing (a file can be dehydrated in between), and before making a thumbnail (409).
+  - **Unit tests:** fake the attribute, spy on `open` and `PIL.Image.open`, and assert the file is never passed to either. With the protection switched off, all 3 of those tests fail (checked).
+  - **UI:** online-only files are shown as "N online-only files were not scanned. Make them available offline and scan again."
+- *`.tif` (owner's decision).* `.tif` (one f) was not in the scanner's list, so such photos were **silently ignored**, breaking the "never silently drop" rule. Now scanned like `.tiff`; separate commit with a test.
+- *Open folder.*
+  - **Plugin:** the Tauri v2 Opener plugin (`tauri-plugin-opener`), called **from Rust only**. Per the docs, Rust-side calls are not gated by capabilities. The page has no `opener:*` permission, and the capabilities file still has only `dialog:allow-open`.
+  - **The command:** `open_scan_folder(scan_id, folder_id)` validates both ids, then asks the backend for the path (`GET /scan/folder`, which answers only for folders holding photos in that scan). The request is plain std TCP to 127.0.0.1 with a proper `Host`, `Connection: close` and 2-second connect/read/write timeouts, so no HTTP crate was added. The command then requires an absolute, existing directory and calls `open_path`, which goes through the Windows shell. `explorer.exe` is not launched directly, because it misparses folder names containing commas.
+  - **Rust tests (9):** reply parsing (200, 404 message, generic error, chunked, malformed), id validation, the request's Host and Connection headers, a real loopback exchange, and a silent server timing out in about 2 seconds.
+- *CORS and Host (approved in the same checkpoint, since Open folder is the first action that touches the file system).*
+  - **Before:** `allow_origins=["*"]`, so any web page could drive the backend.
+  - **Now:**
+    - CORS uses an origin pattern that accepts `http(s)://tauri.localhost`, `tauri://localhost`, and `localhost` / `127.0.0.1` on any port, with GET/POST, Content-Type and no credentials.
+    - Any request with another `Origin` gets 403. That's stricter than CORS headers alone, which only hide the reply. Each refused origin is logged once to backend.log.
+    - `TrustedHostMiddleware` allows only `127.0.0.1` and `localhost`, against DNS rebinding.
+    - Requests without `Origin` (img thumbnails, Rust, scripts) are unaffected.
+  - **Tests:** 4 unit tests run through the full middleware stack, including that each refused origin is logged once; 4 smoke checks.
+  - **Reminder:** `tauri dev` loads `http://localhost:5173`, so only the installed MSI exercises `http://tauri.localhost`.
+- *UI.*
+  - **Tabs:** Insights (the default after a scan) and Review duplicates. Both panels stay mounted (`hidden`), so the selection and page survive a switch. After a delete the insights are fetched again.
+  - **Above the tabs:** the delete banner and skipped-files notice. The "keeps one photo" line moved into the Review tab.
+  - **Pinned:** only the header and the delete bar; the summary strip and the tabs scroll.
+  - **Accessibility:** tabs follow the WAI-ARIA pattern (tablist/tab/tabpanel, aria-selected/controls/labelledby, roving tabindex, Left/Right wrap, Home/End; selection follows focus).
+- *Measurements (browser pane, 800x600 page).*
+  - **Contrast:** light-mode minimum 4.76 (the existing folder path in the strip); dark-mode minimum 6.96. The only lower readings are the strip's decorative "·" separators, which are hidden from screen readers.
+  - **Tags:** light 9.45 / 6.59 / 7.57, dark 8.40 / 10.87 / 11.11 (Mixed / same folder / other folders).
+  - **Open folder:** 10.35 light, 11.87 dark.
+  - **Pixel budget (scrolled, with a selection):** header 85 px, delete bar 66 px + 16 px gap, **433 px of content between them**. Without a selection, 515 px. The real window is about 39 px shorter (title bar), so expect about 394 px.
+  - **Table columns:** folder 208 / photos 56 / with duplicates 128 / tag 176 / button 112 px, no overflow. Long paths are shortened from the start to 26 characters ("…\2024\Holiday"), with the full path on hover.
+  - **Speed:** `build_insights` on a synthetic 25,000-photo / 12,500-group session took about 111 ms; the unit test bar is under 1 s.
+- *Test tree.* `scripts/make-insights-tree.ps1` (default `C:\prism_insights`; refuses a drive root, and refuses an existing folder without its `_expected.json` marker) plants:
+  - Pictures\Camera: 20 photos plus 6 " - Copy" copies.
+  - Pictures\WhatsApp\Images: 12 copies of Camera photos plus 3 unique.
+  - Downloads: 6 photos plus 6 " (1)" copies, 3 photos that are also in both other folders, a HEIC, a CR2 and a tiny PNG.
+  - One photo at the top level.
+
+  Expected: 57 photos, 4 folders, 24 groups (12 in one folder, 12 across, 3 across three folders), 27 extra copies, and the tips copy_suffix, number_suffix, folder_pair and same_folder. The smoke test builds it in %TEMP%, checks totals, folders, tags, pairs, tips, coverage, headlines and `/scan/folder`, then deletes the 6 Camera copy groups and checks the recompute: 18 groups, the copy tip gone, and the same folder id.
+- *Testing notes.*
+  - **No frontend test runner** (Python and PowerShell tests only), so tab accessibility was verified in the browser pane by script: roles, aria wiring, tabindex, and every key. Adding Vitest + Testing Library is on the backlog and needs the owner's OK (new dev dependencies).
+  - **Vite crashed** with `EBUSY` while `cargo check` wrote `src-tauri\target` (the browser-pane server runs without polling); restarted.
+  - **Screenshots:** the pane sometimes captured only the top-left quarter at 2× density; measurements were taken from the DOM.
+- *Not verified (owner will):* the real Open folder button and the window in `tauri dev`; the installed MSI (the release origin, the frozen backend's new routes and middleware). No exe or MSI was built in this checkpoint.
 
 ## 7. Decisions log (with reasoning)
 
@@ -439,7 +522,7 @@ From reading the code (not tested; treat as hypotheses):
 4. Perceptual-hash near-duplicates (v0.2): dHash with Pillow + numpy (avoid scipy); wait for real-user feedback on whether exact matches suffice; consider a "similar" group type and lower confidence scores; this is where `group_type="visual"` and the "≈ Visual Match" label come alive.
 5. Code signing (cost and lead time; decide before any public launch).
 
-**Additional backlog (unordered)**: Cancel Scan; faster hashing on slow disks; Vite ignores `src-tauri`; delete dead files and rewrite `requirements.txt`; CORS hardening; HEIC/RAW support and a clearer message about tiny files; thumbnails allow-list as a set maintained per session; dict lookups in `/scan/results`; session cleanup; clean-machine (no Python) install test; NSIS bundling (needs a reliable download); licensing/tiers (Free/Pro/Business) when the product is ready; AI Pack via ONNX Runtime (v0.3+).
+**Additional backlog (unordered)**: Cancel Scan; faster hashing on slow disks; Vite ignores `src-tauri` (bit again in CP9: `cargo check` crashed the browser-pane dev server); delete dead files (including `backend/app/main_old.py`, found in CP9) and rewrite `requirements.txt`; ~~CORS hardening~~ (done in CP9); a frontend test runner (Vitest + Testing Library, for components such as the tabs; ask first, adds dev dependencies); HEIC/RAW support (the Insights coverage line now shows how many were not checked) and a clearer message about tiny files; thumbnails allow-list as a set maintained per session; dict lookups in `/scan/results`; session cleanup; clean-machine (no Python) install test; NSIS bundling (needs a reliable download); licensing/tiers (Free/Pro/Business) when the product is ready; AI Pack via ONNX Runtime (v0.3+).
 
 **Later, not started (owner's decision, 2026-10-05): Reorganizer.** After the user confirms, help move files into a simpler structure. Needs, before any code: a defined meaning of "simpler" (by date? by event? merging similar folders?); a preview of every move before it happens; a saved undo log and one-click Undo; no overwriting of files with the same name; care with OneDrive-synced folders and moves across drives; a warning for photo-catalog apps such as Lightroom, which track files by location; tests on generated folder trees including a failure halfway through. Reason it is held back: unlike deleting, moving has no Recycle Bin, so a bug could scramble a user's organized library. Revisit once real users ask for it. (Checkpoint 9, scan insights, was explicitly scoped to exclude any reorganize button, wizard, file-moving endpoint or reorganize tip.)
 
