@@ -11,6 +11,23 @@ import type {
   DeleteResponse,
 } from '../types';
 
+/** The backend's own explanation ({"message": "..."}) if it sent one, else the HTTP status text. */
+async function errorMessage(response: Response): Promise<string> {
+  const fallback = response.statusText
+    ? `HTTP ${response.status}: ${response.statusText}`
+    : `HTTP ${response.status}`;
+  try {
+    const data: unknown = await response.json();
+    if (data && typeof data === 'object' && 'message' in data) {
+      const message = (data as { message: unknown }).message;
+      if (typeof message === 'string' && message.trim()) return message.trim();
+    }
+  } catch {
+    // body was empty or not JSON
+  }
+  return fallback;
+}
+
 class ApiService {
   private baseUrl = 'http://127.0.0.1:8000';
 
@@ -60,18 +77,22 @@ class ApiService {
       options.body = JSON.stringify(body);
     }
 
+    let response: Response;
     try {
-      const response = await fetch(url, options);
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-
-      return (await response.json()) as T;
+      response = await fetch(url, options);
     } catch (error) {
+      // fetch only throws when there is no HTTP response at all (backend stopped or crashed)
       console.error(`API Error [${method} ${endpoint}]:`, error);
-      throw error;
+      throw new Error("Prism's background service isn't responding. Close Prism and open it again.");
     }
+
+    if (!response.ok) {
+      const message = await errorMessage(response);
+      console.error(`API Error [${method} ${endpoint}]: ${message}`);
+      throw new Error(message);
+    }
+
+    return (await response.json()) as T;
   }
 
   async checkHealth(): Promise<{ status: string }> {
